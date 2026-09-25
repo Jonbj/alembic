@@ -206,12 +206,18 @@
           "costo_usd": null,
           "nota": "[DAY-029] 51 simboli con almeno un segnale -> ~45/96 di watchlist senza segnali (proxy su sentiment_signals, non no_news_backstop: dossier del 22/09 assente). Alert held_no_news_loss su SBUX (9 sedute) e AMAT (2).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-024] no_news_backstop: 36 simboli a zero news, 2 mover (CMCSA -3,46%, DELL +4,46%).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-024"
         }
       ],
       "costo_cumulato_usd": 5068.1,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 5
+      "occorrenze_non_stimate": 6
     },
     {
       "id": "F-002",
@@ -593,12 +599,18 @@
           "costo_usd": null,
           "nota": "[DAY-020] 21:00 DECAY CRITICAL: S1 IC 0,035->-0,043, S2 0,042->-0,043, S4 0,028->-0,043 (stesso valore); drawdown 13,4% identico su S1 e S2 (S2 non attiva).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-017] 21:00 DECAY CRITICAL con lo stesso IC -0,054 su S1, S2 e S4; drawdown 13,4% identico su S1 e S2.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-017"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 21
+      "occorrenze_non_stimate": 22
     },
     {
       "id": "F-005",
@@ -672,12 +684,18 @@
           "costo_usd": null,
           "nota": "[DAY-022] TelegramNotifier 400 Bad Request alle 14:07:06, 14:22:05 (alert #161 AMAT/WDC scoperte) e 23:05:00.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-020] Telegram 400 Bad Request alle 14:00:00 (loss-feedback S4) e 14:22:06 x2 (AMAT/WDC scoperte).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-020"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 11
+      "occorrenze_non_stimate": 12
     },
     {
       "id": "F-006",
@@ -896,12 +914,18 @@
           "costo_usd": null,
           "nota": "[DAY-026] ingestion_stats_daily alpaca_benzinga: fetched 1.549, duplicates 6.296.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-023] ingestion_stats_daily 2026-09-17 alpaca_benzinga: duplicates 7.291 vs fetched 1.559.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-023"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 27
+      "occorrenze_non_stimate": 28
     },
     {
       "id": "F-008",
@@ -1283,10 +1307,16 @@
           "costo_usd": null,
           "nota": "[DAY-012] 98 dei 147 segnali ensemble non hanno nessuna risposta llm_responses con eligible=true (retry a floor 0 non propagato).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-016] 55/129 segnali ensemble con zero risposte eligible=true in llm_responses.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-016"
         }
       ],
       "costo_cumulato_usd": 54.48,
-      "occorrenze_non_stimate": 14,
+      "occorrenze_non_stimate": 15,
       "stato": "aperto",
       "issue": null
     },
@@ -1458,10 +1488,16 @@
           "costo_usd": null,
           "nota": "[DAY-017] Le 2 SELL del giorno (38889 BABA, 39098 ARM) hanno signal_id NULL; il segnale causante e' solo nel testo del reason.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-013] SELL 31249 (SPCX) e 32317 (META) con signal_id NULL.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-013"
         }
       ],
       "costo_cumulato_usd": 0.0,
-      "occorrenze_non_stimate": 25,
+      "occorrenze_non_stimate": 26,
       "stato": "aperto",
       "issue": null
     },
@@ -1669,10 +1705,16 @@
           "costo_usd": null,
           "nota": "[DAY-006] 146 articoli distinti -> 232 righe scorate; 33 articoli multi-ticker generano 119 righe (51,3%), massimo 14 (Arora Report, che ha prodotto l'uscita ARM di F-008). Costo non stimato separatamente.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-006] 123 articoli -> 215 righe; 34 multi-ticker -> 126 righe (58,6%), max 13. Costo gia' nell'occorrenza ALPHA_MISS del 17/09.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-006"
         }
       ],
       "costo_cumulato_usd": 937.61,
-      "occorrenze_non_stimate": 22,
+      "occorrenze_non_stimate": 23,
       "stato": "aperto",
       "issue": null
     },
@@ -1838,9 +1880,15 @@
           "costo_usd": -1.69,
           "nota": "[DAY-004] BABA venduta 16:52 @116,56 (decisione 38889, below_entry_gate su segnale 12090 +0,188) e ricomprata 17:37 @116,36 (decisione 39203, segnale 12151 +0,348), 45 minuti dopo. Controfattuale corto: tenere 1023 (12,3054 @116,7025) fino alla chiusura 116,31 = -4,83 gross, -5,23 con costo d'ingresso stimato 0,40; esito reale 1023 (-2,54 net) + 1024 a chiusura (-0,62 gross, -0,38 meta' costo 0,76) = -3,54. Il churn ha reso 1,69 -> costo -1,69 (attribuito).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": -1.59,
+          "nota": "[DAY-003] SPCX venduta 17:37 a +0,042 (glm +0,25 vs gpt -0,3, std 0,389) 2,5 h dopo ingresso a +0,355; trade 1012. Tenere fino alla chiusura (154,79 vs 154,96) avrebbe reso -1,59 $: costo -1,59 (la vendita ha reso).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-003"
         }
       ],
-      "costo_cumulato_usd": 70.84,
+      "costo_cumulato_usd": 69.25,
       "occorrenze_non_stimate": 6,
       "stato": "aperto",
       "issue": null
@@ -1983,10 +2031,16 @@
           "costo_usd": null,
           "nota": "[DAY-019] orders_count=5 su 24 cicli (6 e 4 in due), contro submitted 0-1: i 5 ordini target (AMAT, GM, SOXX, NOW, BABA...) sono bloccati da P0-05 a ogni ciclo.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-011] portfolio_cycles 1538-1561: orders_count 2-6 per ciclo contro 0-1 ordini inviati.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-011"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 22,
+      "occorrenze_non_stimate": 23,
       "stato": "aperto",
       "issue": null
     },
@@ -2140,10 +2194,16 @@
           "costo_usd": null,
           "nota": "[DAY-018] decision_price NULL su tutte e 5 le decisioni d'ordine (38167, 38889, 39098, 39203, 39855) e slippage_est NULL: slippage decisione->fill non misurabile.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-012] decision_price NULL su tutte e 7 le decisioni d'ordine (30092/30323/30435/30551/30897/31249/32317), presente solo in s4_intent_events.snapshot.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-012"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 24,
+      "occorrenze_non_stimate": 25,
       "stato": "aperto",
       "issue": null
     },
@@ -2213,10 +2273,16 @@
           "costo_usd": null,
           "nota": "[DAY-024] 84 'SPY benchmark fetch failed: subscription does not permit querying recent SIP data', nessun alert.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-022] 'SPY benchmark fetch failed: subscription does not permit querying recent SIP data' x84 senza alert.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-022"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 10,
+      "occorrenze_non_stimate": 11,
       "stato": "aperto",
       "issue": "#444"
     },
@@ -2311,10 +2377,16 @@
           "costo_usd": null,
           "nota": "[DAY-023] Bot token Telegram in chiaro negli URL loggati (httpx INFO e WARNING d'errore) e, nuovo, api_key FRED in chiaro nell'ERROR di regime detection delle 07:00:04 (worker-inference).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-021] 17.270 righe con URL bot Telegram in worker-inference-2026-09-17.log, 7 in worker; URL FRED con api_key alle 07:00:05.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-021"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 8,
+      "occorrenze_non_stimate": 9,
       "stato": "aperto",
       "issue": null
     },
@@ -2682,9 +2754,15 @@
           "costo_usd": -25.83,
           "nota": "[DAY-007] Primo ciclo 14:07:00 (open gap 37,01 min, alert portfolio_cycle_session_grid). META +0,318 (segnale 12008, 13:50:50, ensemble, non a libro) non e' mai stato valutato: un ciclo alle 13:52 l'avrebbe comprato. Congetturale su size 2.200 $: ingresso ~745,43, chiusura 736,68 = -1,174% -> -25,83 (il buco ha evitato una perdita).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": -1.99,
+          "nota": "[DAY-007] Primo ciclo 14:07 (portfolio_cycle_late CRITICAL 13:30-14:08); CRM +0,423 ensemble delle 13:34 sovrascritto 14:03 da 0,000 senza mai vedere un ciclo. Congetturale 2.200 $: ingresso 13:37 @243,25, chiusura 243,03 => -1,99 (il buco ha evitato una piccola perdita).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-007"
         }
       ],
-      "costo_cumulato_usd": 108.22,
+      "costo_cumulato_usd": 106.23,
       "occorrenze_non_stimate": 23,
       "stato": "aperto",
       "issue": null
@@ -2767,10 +2845,16 @@
           "costo_usd": null,
           "nota": "[DAY-014] Stop META qty 1 su 1,9489 (51,3%, ordine 81142bf6), BABA 12/12,3054 (97,5%, creato un ciclo dopo l'ingresso) e 12/12,3415 (97,2%). AMAT a -21% e WDC a -15/-18% senza stop (sub_one_share) per tutta la seduta.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-010] Stop MU qty 1 su 1,4634 (68,3%); AMAT -29,6% e WDC -22,9% senza stop (sub_one_share) x24. Nessuno stop scattato.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-010"
         }
       ],
       "costo_cumulato_usd": 35.9,
-      "occorrenze_non_stimate": 10,
+      "occorrenze_non_stimate": 11,
       "stato": "aperto",
       "issue": null
     },
@@ -2870,9 +2954,15 @@
           "costo_usd": null,
           "nota": "[DAY-008] META 12008 +0,318 (13:50:50) sovrascritto alle 14:03:55 da 12017 0,000 prima del primo ciclo; S4 legge solo l'ultimo segnale. Stesso episodio di F-021 del 2026-09-22: costo registrato li' per non contarlo due volte.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": 6.59,
+          "nota": "[DAY-008] NVDA +0,496 (11347, 14:00:53) sovrascritto dopo 76 s da +0,013 (11351); ciclo 14:07 SKIP_THRESHOLD. Congetturale 2.200 $: 14:07 @218,715 -> chiusura 219,37 = +6,59 non catturati.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-008"
         }
       ],
-      "costo_cumulato_usd": 31.59,
+      "costo_cumulato_usd": 38.18,
       "occorrenze_non_stimate": 8,
       "stato": "aperto",
       "issue": null
@@ -3365,10 +3455,16 @@
           "costo_usd": 3.11,
           "nota": "Ingresso S4 su MU 14:52 @1035,406 (score 0,325) con quota_movimento_precedente_al_segnale 1,264 (non degenere) ed entry_percentile 0,860; mtm_eod -3,11 $. MU +2,75%, non mover. Serie cumulata late_entry_joint_distribution: fascia >=1,0 somma -205,40 $ su 14 ingressi (win rate 0,22 sui 9 realizzati).",
           "fonte": "ALPHA_MISS_REPORT_2026-09-09.md §8"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-005] Ingressi MU (percentile 0,772, shadow_late_entry, quota movimento precedente 1,059) e NVO (percentile 0,973). Costo gia' registrato nell'occorrenza ALPHA_MISS del 17/09: null per non contarlo due volte.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-005"
         }
       ],
       "costo_cumulato_usd": 369.0,
-      "occorrenze_non_stimate": 8,
+      "occorrenze_non_stimate": 9,
       "stato": "aperto",
       "issue": null
     },
@@ -3492,9 +3588,15 @@
           "costo_usd": -31.08,
           "nota": "[DAY-009] SKIP_PYRAMIDING su GOOGL 14:07 (11992, +0,341, S1 a libro dal 09-01) e SOXX 16:37 (12117, +0,403, S1 dal 07-28). Congetturale 2.200 $: GOOGL 360,09 -> 351,185 = -54,41 evitati, SOXX 566,74 -> 572,75 = +23,33 mancati, netto -31,08. Tracciabilita': s4_intent_events SKIP_PYRAMIDING 102 contro 4 righe execution_decisions (4%); log guard NOW x24, GM x24, AMAT x19, SOXX x14, ARM x12, MRK x5, JPM x3, GOOGL x1.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": 29.68,
+          "nota": "[DAY-009] P0-05 blocca XOM +0,42 e AAPL +0,42 (a libro da S1); 75 SKIP_PYRAMIDING in s4_intent_events contro 15 in execution_decisions. Congetturale 2.200 $: XOM 161,81->163,26 +19,71; AAPL 335,569->337,09 +9,97. MRVL escluso (gia' nell'occorrenza ALPHA_MISS).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-009"
         }
       ],
-      "costo_cumulato_usd": 292.45,
+      "costo_cumulato_usd": 322.13,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
@@ -4229,10 +4331,16 @@
           "costo_usd": null,
           "nota": "[DAY-015] UNH trade 279 qty 1,592634 vs broker 0,592634 (scarto 1,000000), quantity_remaining NULL; reconcile-positions 21:35 'partially_wound_down_coheld: 1, anomalies: 0'. Invariato.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-026] run_reconcile_positions 21:35:02: partially_wound_down_coheld 1 con 'anomalies: 0'; simbolo non nel log (verosimilmente UNH, non verificato).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-026"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 7,
+      "occorrenze_non_stimate": 8,
       "stato": "aperto",
       "issue": null
     },
@@ -4641,10 +4749,16 @@
           "costo_usd": null,
           "nota": "[DAY-027] 22:50:00 aperti e 22:50:01 risolti: pipeline:portfolio_cycle_session_grid (open gap 37,01 min), coverage:held_no_news_loss:AMAT (-20,4%) e :SBUX (-9,7%, 9 sedute senza news).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-019] mobile_events 22:50:00->22:50:01: portfolio_cycle_session_grid, held_no_news_loss PFE/SBUX aperti e recovered in ~0,6 s.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-019"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 6,
+      "occorrenze_non_stimate": 7,
       "stato": "aperto",
       "issue": null
     },
@@ -4825,10 +4939,16 @@
           "costo_usd": null,
           "nota": "[DAY-021] 5 righe DECAY CRITICAL alle 21:00 solo nel log; nessuna riga mobile_events, nessun invio.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-018] 11 DECAY CRITICAL solo nel log: nessuna riga mobile_events, nessun Telegram.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-018"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 9,
+      "occorrenze_non_stimate": 10,
       "stato": "aperto",
       "issue": null
     },
@@ -5012,10 +5132,16 @@
           "costo_usd": 19.18,
           "nota": "news_queue_drops 2026-09-09 00:00-20:00Z: 177 righe stale enqueued_off_session=true (58 articoli) contro 18 (7) accodate in seduta; il lotto off-session cade alle 13:37 al primo drenaggio. Fra gli scarti: il pezzo META delle 04:02 'Meta's Muse AI Agent Promises to Handle Your Digital Life' (catalizzatore del +6,55%, 87% nel gap) e le uniche notizie UNH ('UnitedHealth Sells Interest in Florida WellMed Clinics to TPG' - Bloomberg 08:12; CMS/Oz 08:22, age 5,4h). META sopravvive solo col pezzo delle 11:44 scorato alle 13:38 (first_seen_to_ingested 6.856,9 s) a 0,234; UNH risulta cieco_lato_uscita=true con ritorno_da_ingresso -8,65% e 4 sedute senza righe: la cecita' di oggi su UNH e' della coda, non del provider.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-09.md §8"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-025] Drenaggio coda notturna WS all'apertura: 211 stale, 82 not_tradable, 727 duplicate_id fuori seduta; 106 dispatch market_closed.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-025"
         }
       ],
       "costo_cumulato_usd": 19.18,
-      "occorrenze_non_stimate": 4,
+      "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
     },
@@ -5112,10 +5238,16 @@
           "costo_usd": null,
           "nota": "[DAY-002] Prova diretta della doppia provenienza nella stessa giornata. NVDA (decision 15642, 14:07): sentiment_signals.score=0,3611968, intent snapshot.score=0,3611968, disposition.ranked_signal.score=0,4334362 (=x1,2), execution_decisions.signal_score=0,3611968 -> GREZZO. CRM (decision 16131, 19:22): score=0,6165789, ranked_signal.score=0,7398947 (=x1,2), execution_decisions.signal_score=0,7398947 -> MOLTIPLICATO. Stesso giorno, stessa colonna, due provenienze. velocity_multiplier NULL su entrambe (migrazione 077 non ancora applicata a quella data), quindi la provenienza non e' ricostruibile dalla riga.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-28.md"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-002] BUY BA execution_decisions 30551 signal_score 0,274 < gate 0,30, velocity_multiplier NULL; intento ranking_score 0,3285. Stesso schema META/MU/NVO. BUY conforme alla regola: costo non attribuibile.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-002"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 2,
+      "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": "#550"
     },
@@ -5199,10 +5331,16 @@
           "costo_usd": null,
           "nota": "[DAY-004] 18 righe su 81 (22,2%) con entita' HTML non decodificate in title o body_snippet. Include news 9201, l'articolo che ha generato l'unico BUY in perdita della giornata: body_snippet = 'Nvidia&#39;s reports a $13 billion bid for Hugging Face...'. Anche 9279 (che ha generato il BUY CRM): '...the top S&amp;P 500 performer...'. Nessun tag HTML residuo, solo entita'. Fix edfd73e0 del 2026-09-21, posteriore a questa seduta.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-28.md"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-015] 70/215 righe con entita' HTML nel body (64 WS, 6 REST), fix edfd73e0 non deployato. Attribuita al codice pre-fix: 0 righe finbert_fallback_events per verificare il testo inviato.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-015"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 4,
+      "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
     },
@@ -5255,10 +5393,16 @@
           "costo_usd": null,
           "nota": "[DAY-011] 82/232 segnali (35,3%) a modello singolo con fallback_used=true (70 con due risposte a DB); somma finbert_fallbacks negli esiti task = 85 contro 3 righe reali in finbert_fallback_events. 29 SKIP_FALLBACK (AMD +0,385, XLK +0,420, META +0,420). Primo giorno GLM-5.3: glm sotto floor 0,40 nel 75,9% delle risposte (glm-5.2: 54-59% dal 17 al 21/09, mediana conf 0,30 -> 0,25).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-004] run_sentiment_worker dichiara finbert_fallbacks 86, finbert_fallback_events 0 righe (misurato): sono 67 single gpt-oss + 19 single glm. Motivo SELL META 32317 li chiama 'FinBERT fallback'.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-004"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 4,
+      "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
     },
@@ -5381,10 +5525,16 @@
           "costo_usd": null,
           "nota": "[DAY-016] /api/trades riga 8aacfe22 (SELL BABA 16:52) espone entry_price 116,36 (quello del BUY successivo delle 17:37) e gross_pnl +2,46, contro trades 1023 entry 116,7025 gross -1,75: segno sbagliato quando lo stesso simbolo viene ricomprato.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": null,
+          "nota": "[DAY-014] /api/trades: SELL META a507446f entry 712,616 gross -66,99 vs trades 1013 +12,03; BUY SPCX/META ancora 'open'.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-014"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 3,
+      "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
     },
@@ -5476,9 +5626,15 @@
           "costo_usd": -72.5,
           "nota": "[DAY-001] Nuovo id: F-025 attribuisce la longevita' al preserve-stale e F-031 tratta il lato ingresso; qui la causa e' diversa (target S1 congelato al 2026-09-01 che contiene simboli comprati da S4: CSCO 0,0236, XLE 0,0236, QQQ 0,0236, PANW 0,0211, INTC 0,0145, MRVL 0,0120, MU 0,0118, WDC 0,0116). trades S4 dal 2026-08-20: fuori dal target S1 63 chiusi/3 aperti (tutti <=1 giorno), dentro 2 chiusi (QQQ 981, MU 989, sentiment_reversal)/7 aperti. CSCO: segnali freschi -0,150 (16:11), -0,420 (16:45 single), -0,294 (18:06) -> solo SKIP_THRESHOLD, nessuna SELL; BABA e ARM (fuori target S1) vendute alla stessa regola. Controfattuale corto (vendita al 2o ciclo dopo il primo segnale fresco sotto gate vs chiusura): CSCO 16:37 @105,03 -23,99; XLE 14:52 @62,36 +13,20; PANW 14:52 @369,26 -20,23; INTC 17:37 @121,74 -30,50; QQQ 17:37 @745,08 -4,95; MU 14:22 @1081,27 -19,23; MRVL 19:07 @264,59 +13,19 -> totale -72,50 (il disarmo ha reso 72,50 $ oggi). La P&L S4 del giorno (~+65) dipende da queste posizioni.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": 5.46,
+          "nota": "[DAY-001] 6 posizioni S4 nel target S1 congelato (INTC, PANW, XLE, QQQ, MRVL, MU) tenute con segnali freschi sotto gate, solo SKIP_THRESHOLD; MU comprata da S4 oggi su simbolo gia' nel target S1 (uscita disarmata dall'ingresso). Stessa regola vende SPCX (fuori target S1) a +0,042. Controfattuale corto: vendita al 2o ciclo dopo il primo segnale sotto gate vs chiusura: INTC -5,51, PANW -13,24, XLE +13,42, QQQ +0,62, MRVL -5,82, MU +5,07 => tenere ha reso -5,46 $, costo attribuito +5,46. primo_avvistamento anticipato dal 2026-09-22 al 2026-09-17.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-001"
         }
       ],
-      "costo_cumulato_usd": -72.5,
+      "costo_cumulato_usd": -67.04,
       "occorrenze_non_stimate": 0,
       "stato": "aperto",
       "issue": null
