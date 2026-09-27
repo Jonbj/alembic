@@ -142,7 +142,6 @@
 #     sono il metro per giudicare la fonte nuova; se resta, sono il prerequisito
 #     di qualunque regola di ammissibilita'. Perimetro: SOLO persistenza, nessun
 #     gate — una riga RETROSPECTIVE continua a diventare un segnale come oggi.
-637  la classificazione di copertura degli articoli non esiste nel path del segnale: ANTICIPATORY/CONCURRENT/RETROSPECTIVE, CONTENT_EMPTY, own-vs-fanout sono calcolati solo nel dossier ex post (verificato: gli unici consumatori sono panels.py, event_context.py e uno script di audit) — serve alla decisione #607 del 28/09
 
 # === 5. COPERTURA E QUALITA' DEL SEGNALE (miglioramenti, non bug) ===
 409  NO_NEWS e' la causa dominante dei miss di Week 35 (9/22) mentre il sistema osserva gia' catalizzatori che non usa: NVO aveva una corporate action OBSERVED, ERIC una volume surprise +1,25  [SOSPESA 09-24, vedi nota sopra — decisione operatore post 28/09 su catalyst=CALENDAR e volume backstop; la parte misurabile e' chiusa da PR #500]
@@ -238,12 +237,7 @@
 #     2026-09-21. Resta il resto della Fase 1 (scaricare l'archivio 2024-2025 ed
 #     eseguire H-A..H-F) e la Fase 2, entrambe descritte nel corpo della issue.
 610  MISURA: backtest news 2024-2025, resto della Fase 1 (scaricatore gia' in main, restano copertura su archivio vero + ipotesi H-A..H-F) e Fase 2 se la popolazione lo giustifica
-563  bug: i crons daily evidence perdono una sessione in modo permanente quando la sessione Claude Code muore
-567  bug: funnel_v2 non ha KPI sul lato uscita — 8 EXIT_RISK mai tracciati (09-10)
-596  obs: il gate di uscita consuma punteggi fan-out di articoli «altro-ticker»
-619  bug: triage log — la maschera dei numeri lascia il decimale in '18.6pp' e spezza i numeri
 541  Il tasso di articoli persi dal WebSocket non e misurabile: WS e REST non conciliati
-606  MISURA: test confermativo pre-registrato — il sentiment sulle news fuori orario (off-session shadow in produzione, confronto diretto con in-session)
 614  Ricerca: disegno del controfattuale sulle uscite — cinque domande che chiudono il disegno
 603  Worker inference: abilitare GPU e rendere FinBERT riproducibile
 516  Weekly alpha-miss: valutare il pilot e proporre il contratto v2
