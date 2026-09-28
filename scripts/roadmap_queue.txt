@@ -249,3 +249,20 @@
 516  Weekly alpha-miss: valutare il pilot e proporre il contratto v2
 518  Weekly alpha-miss reviewer: benchmark read-only sul caso W34
 521  Weekly alpha-miss: implementare il ruolo del reviewer approvato
+# ============================================================================
+# NOTA 2026-09-28 (scadenza freeze #171) — decisione Opzione D (#432).
+#
+# La pre-registrazione della misura shadow off-session (PREREGISTRAZIONE_
+# offsession_shadow_2026-09-10.md) aveva fissato il criterio: INSUFFICIENT_N se
+# n < 30 simbolo-giorni con |score| > 0,30. Esito al 28/09: n = 125 (sopra
+# gate) su 1217 unita' in 17 notti, 98 con forward return D+1 valutabile —
+# NON e' INSUFFICIENT_N. Ma la condizione "e forward return coerenti" non
+# passa: t_HAC = +0,16 (n=874, barra |t| >= 3), r = +0,005 sotto l'IC
+# rilevabile a t3 (0,102); long side media -0,01%, short side media +0,33% di
+# segno contrario. Esito completo: docs/evidence/ESITO_offsession_shadow_2026-09-28.md.
+#
+# La D (spostare il gate di seduta dal consumatore all'esecuzione) NON viene
+# implementata il 28/09: resta opzione post-freeze NON prioritaria, decisione
+# dell'operatore. Lo shadow resta attivo (perimetro invariato) e la correlazione
+# e' ricalcolabile su campione piu' ampio se l'operatore rivede la D.
+# ============================================================================
