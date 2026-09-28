@@ -1047,9 +1047,15 @@
           "costo_usd": 5.94,
           "nota": "AVGO comprato 15:52 @356,05 su signal 11644 +0,368 ISSUER_SPECIFIC; alle 19:16 l'articolo '$3.2T Chip Boom: Which Semiconductor ETFs Get The Biggest Slice?' genera segnali FANOUT su 7 ticker (AVGO +0,115); SELL 19:37 below_entry_gate @355,50, pnl -3,03, drift_post_uscita +5,94.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-18.md §8"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": 11.2,
+          "nota": "META (+11,43%) comprata 14:07 su signal 11827 +0,409 ISSUER_SPECIFIC (Wells Fargo PT 796); +0,435 issuer-specifico alle 15:15 (11884); poi 11895 -0,050 TAG_UNCONFIRMED, 11901 +0,150, 11904 +0,027 FANOUT ('$6.51 Diesel Should Be Crushing the Economy'); SELL 16:07 below_entry_gate 'generated 15:52 score=+0.027' @722,284, pnl_net +5,63, drift_post_uscita +11,20.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-21.md §8"
         }
       ],
-      "costo_cumulato_usd": 73.72,
+      "costo_cumulato_usd": 84.92,
       "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
@@ -2376,9 +2382,15 @@
           "costo_usd": null,
           "nota": "[DAY-022] 07:00:05,022 'Failed to fetch macro data for regime detection: Server error 500' (FRED VIXCLS) -> 07:00:05,255 detect_regime succeeded in 5,25s: None. regime_mult resta 0,7 su tutti i cicli.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-022]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": 52.35,
+          "nota": "detect_regime fallisce alle 07:00 (FRED read timeout) e alle 13:30 (T10Y2Y 502) ed e' registrato succeeded: None; il worker applica 'P0-09: regime:current absent - deterministic VIX fallback x0.20 (vix=absent)' su tutti i cicli 14:07-19:52 (62 righe; 0 nelle sedute 14-18/09). event_market_context.regime HIGH_VOL multiplier 0,2 con vix 14,87. I 5 ingressi S4 hanno nozionale 409,75-420,86 $ (~19% dello slot 2.200 $). Sembra un difetto di correttezza: input mancante -> moltiplicatore piu' severo.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-21.md §8"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 52.35,
       "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
@@ -3696,9 +3708,15 @@
           "costo_usd": -93.1,
           "nota": "[DAY-003] 114 SKIP_PYRAMIDING tradabili, 40 su 6 titoli S1: CVX 19 (primo 14:22), MRK 12 (16:52), MRVL 4 (14:07), DELL 3 (15:52), XOM 1 (14:07), AMD 1 (16:22, +0,816). Solo 13/114 in execution_decisions. Controfattuale corto 2.200 $ primo slot -> close: CVX +2,68, MRK -2,40, MRVL -57,79, DELL -38,55, XOM +7,66, AMD -4,70 = -93,10 (il guard ha evitato una perdita).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-003]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": -1.65,
+          "nota": "120 intenti S4 tradabili: 94 SKIP_PYRAMIDING (78,3%), 21 SKIP_IDEMPOTENCY, 5 SUBMITTED. Blocchi GM 24, PBR 24, AMD 10, JPM 10, QQQ 8, NOK 5, AMAT 4, MRK 3, LLY 2, META 2, INTC 2; 82/94 su simboli detenuti da S1. AMD (+9,95%, S1 475 $) signal 11896 +0,710 ISSUER_SPECIFIC bloccato 15:37-17:52. guard_decisions ha 7 righe SKIP_PYRAMIDING su 94.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-21.md §8"
         }
       ],
-      "costo_cumulato_usd": 266.92,
+      "costo_cumulato_usd": 265.27,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
