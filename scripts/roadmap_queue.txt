@@ -265,4 +265,7 @@
 # implementata il 28/09: resta opzione post-freeze NON prioritaria, decisione
 # dell'operatore. Lo shadow resta attivo (perimetro invariato) e la correlazione
 # e' ricalcolabile su campione piu' ampio se l'operatore rivede la D.
+#
+# Riferimenti: PR https://github.com/Jonbj/alembic/pull/669 (questa registrazione);
+# verbale su #432: https://github.com/Jonbj/alembic/issues/432#issuecomment-5865823300
 # ============================================================================
