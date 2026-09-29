@@ -224,12 +224,18 @@
           "costo_usd": 97.25,
           "nota": "[DAY-023] 34 simboli di watchlist a zero righe news_log; mover ARM +4,04% e TXN +3,29% a zero notizie (DELL -3,46% detenuta). Congetturale, size 2.200: dossier opportunity_v2.net_opportunity_usd ARM 66,75 + TXN 30,50 = 97,25 (ingresso primo ciclo utile, uscita close, al netto costi).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-023]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-015] 40/96 simboli di watchlist a zero righe news_log (dossier no_news_backstop), mover a zero news RDDT, AMAT, BP.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 5247.64,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 6
+      "occorrenze_non_stimate": 7
     },
     {
       "id": "F-002",
@@ -629,12 +635,18 @@
           "costo_usd": null,
           "nota": "[DAY-018] decay_monitor 21:00: IC S1 0,035->-0,047, S2 0,042->-0,047, S4 0,028->-0,047 (stesso valore); drawdown 13,4% identico su S1 e S2.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-018]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-018] 21:00 DECAY CRITICAL: S1 IC 0,035->-0,044, S2 0,042->-0,044, S4 0,028->-0,044 (stesso valore); drawdown 13,4% identico su S1 e S2.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 24
+      "occorrenze_non_stimate": 25
     },
     {
       "id": "F-005",
@@ -726,12 +738,18 @@
           "costo_usd": null,
           "nota": "[DAY-007] Telegram 400 alle 14:37:04 x2 (#161 AMAT/WDC) e alle 23:05:00 su run_duplicate_signals_alert, che riporta comunque {'duplicated_news_log': 69, 'alerted': 1}.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-007]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-020] TelegramNotifier 400 Bad Request alle 04:00:00, 14:07:06 (x2, alert #161) e 23:05:00.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 14
+      "occorrenze_non_stimate": 15
     },
     {
       "id": "F-006",
@@ -968,12 +986,18 @@
           "costo_usd": null,
           "nota": "[DAY-022] ingestion_stats_daily 2026-09-18 alpaca_benzinga: duplicates 7.082 contro fetched 1.477.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-022]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-022] ingestion_stats_daily alpaca_benzinga 2026-09-21: fetched 1.514, duplicates 6.753.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 30
+      "occorrenze_non_stimate": 31
     },
     {
       "id": "F-008",
@@ -1077,10 +1101,16 @@
           "costo_usd": 11.2,
           "nota": "META (+11,43%) comprata 14:07 su signal 11827 +0,409 ISSUER_SPECIFIC (Wells Fargo PT 796); +0,435 issuer-specifico alle 15:15 (11884); poi 11895 -0,050 TAG_UNCONFIRMED, 11901 +0,150, 11904 +0,027 FANOUT ('$6.51 Diesel Should Be Crushing the Economy'); SELL 16:07 below_entry_gate 'generated 15:52 score=+0.027' @722,284, pnl_net +5,63, drift_post_uscita +11,20.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-21.md §8"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-003] META SELL 16:07 (decisione 36172, trade 1018) su 11904 +0,027 FANOUT ('$6.51 Diesel Should Be Crushing the Economy'). Costo gia' prezzato nell'occorrenza ALPHA_MISS 2026-09-21 (11,20 $): qui null.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 84.92,
-      "occorrenze_non_stimate": 3,
+      "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
     },
@@ -1379,10 +1409,16 @@
           "costo_usd": null,
           "nota": "[DAY-016] 79/168 segnali ensemble con zero risposte llm_responses eligible=true.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-016]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-007] 52 dei 120 segnali ensemble senza alcuna risposta llm_responses eligible=true (68 con due eleggibili).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 54.48,
-      "occorrenze_non_stimate": 16,
+      "occorrenze_non_stimate": 17,
       "stato": "aperto",
       "issue": null
     },
@@ -1566,10 +1602,16 @@
           "costo_usd": null,
           "nota": "[DAY-009] 3/3 SELL (ED 32563, 35164, 35165) con signal_id NULL; decision_signal_id_coverage SELL 0/3.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-009]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-009] 3/3 SELL (36071 NVO, 36171 HOOD, 36172 META) con signal_id NULL; decision_signal_id_coverage.regressions=['SELL'].",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 0.0,
-      "occorrenze_non_stimate": 27,
+      "occorrenze_non_stimate": 28,
       "stato": "aperto",
       "issue": null
     },
@@ -1795,10 +1837,16 @@
           "costo_usd": null,
           "nota": "[DAY-027] 134 articoli -> 242 righe; 38 articoli multi-ticker -> 146 righe (60,3%), massimo 18. L'uscita AVGO nasce da un pezzo ETF semis a 7 ticker (costo gia' in F-008 da ALPHA_MISS).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-027]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-014] 122 articoli distinti -> 189 righe; 31 articoli multi-ticker generano 98 righe (51,9%), massimo 11.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 937.61,
-      "occorrenze_non_stimate": 25,
+      "occorrenze_non_stimate": 26,
       "stato": "aperto",
       "issue": null
     },
@@ -1970,9 +2018,15 @@
           "costo_usd": -1.59,
           "nota": "[DAY-003] SPCX venduta 17:37 a +0,042 (glm +0,25 vs gpt -0,3, std 0,389) 2,5 h dopo ingresso a +0,355; trade 1012. Tenere fino alla chiusura (154,79 vs 154,96) avrebbe reso -1,59 $: costo -1,59 (la vendita ha reso).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-003"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": -2.79,
+          "nota": "[DAY-004] HOOD SELL 16:07 (decisione 36171, trade 1020, net +4,33) su segnale +0,183 TAG_UNCONFIRMED sotto il gate 0,30. Costo attribuito = drift_post_uscita del dossier -2,79 $ (l'uscita ha evitato la perdita).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
-      "costo_cumulato_usd": 69.25,
+      "costo_cumulato_usd": 66.46,
       "occorrenze_non_stimate": 6,
       "stato": "aperto",
       "issue": null
@@ -2133,10 +2187,16 @@
           "costo_usd": null,
           "nota": "[DAY-011] portfolio_cycles 1562-1585: orders_count 4-7 per ciclo contro 0-2 ordini inviati (ciclo 19:37: 7 contro 2).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-011]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-011] portfolio_cycles 1586-1609: orders_count 5 (6 e 7 in due cicli) contro 0-2 ordini inviati.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 25,
+      "occorrenze_non_stimate": 26,
       "stato": "aperto",
       "issue": null
     },
@@ -2308,10 +2368,16 @@
           "costo_usd": null,
           "nota": "[DAY-010] decision_price NULL su 4/4 decisioni d'ordine; intento AVGO late_entry.decision_price 356,015 (slippage BUY +1,0 bp); slippage_est = cost_usd (0,79/0,79/0,80).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-010]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-010] trades 1018-1022: slippage_est identico a cost_usd; decision_price NULL su 8/8 decisioni d'ordine.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 27,
+      "occorrenze_non_stimate": 28,
       "stato": "aperto",
       "issue": null
     },
@@ -2399,10 +2465,16 @@
           "costo_usd": null,
           "nota": "[DAY-021] 'SPY benchmark fetch failed' x84 nel log worker, nessun alert.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-021]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-017] 84 'SPY benchmark fetch failed: subscription does not permit querying recent SIP data', nessun alert.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 13,
+      "occorrenze_non_stimate": 14,
       "stato": "aperto",
       "issue": "#444"
     },
@@ -2454,10 +2526,16 @@
           "costo_usd": null,
           "nota": "[DAY-026] detect_regime 07:00:03 'Failed to fetch macro data' (FRED 500) -> task succeeded None; giro delle 13:30 riuscito (sideways x0,7).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-026]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-001] detect_regime 07:00:15 FRED timeout e 13:30:04 T10Y2Y 502 -> entrambi 'succeeded ... None'; 62 righe 'P0-09: regime:current absent - x0.20 (vix=absent)' su tutti i 24 cicli, nessun mobile_events. Costo gia' prezzato nell'occorrenza ALPHA_MISS 2026-09-21 (52,35 $): qui null per non contarlo due volte.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 52.35,
-      "occorrenze_non_stimate": 6,
+      "occorrenze_non_stimate": 7,
       "stato": "aperto",
       "issue": null
     },
@@ -2533,10 +2611,16 @@
           "costo_usd": null,
           "nota": "[DAY-020] 17.246 righe con api.telegram.org/bot<token> in worker-inference-2026-09-18.log, 7 in worker; URL FRED con api_key x4.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-020]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-021] api_key FRED in chiaro nell'ERROR 13:30:04 di regime detection; bot token Telegram in 17.257 righe di worker-inference e 10 di worker.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 11,
+      "occorrenze_non_stimate": 12,
       "stato": "aperto",
       "issue": null
     },
@@ -2648,10 +2732,16 @@
           "costo_usd": -73.92,
           "nota": "[DAY-002] QCOM 10052 +0,706 (articolo 11:48:27, scorato 13:41:49) e HOOD 10053 +0,325 (11:50:22 -> 13:43:07) arrivano al primo ciclo 14:07 con l'articolo oltre news_age_hours=2.0: SKIP_ENTRY_FRESHNESS. Congetturale su 2.200 $, prezzi Alpaca 1 min: QCOM 178,58 (14:07) -> close 176,40 = -26,86; HOOD 117,80 -> 115,28 = -47,06. Costo negativo: oggi il filtro ha evitato una perdita, il movimento era nel gap.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-002]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-006] Primo giorno della regressione di latenza: 11.582 s / 189 articoli = 61,3 s per articolo (09-18: 10,1; 09-17: 15,3), max task 589 s; pub->segnale in seduta mediana 10,4 min, p90 69,2 (09-18: 0,7/8,9). Coincide coi rebuild 08:20Z/10:20Z (ed53c851->44451ca6), non attribuibile senza traccia Ollama (F-086).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": -71.55,
-      "occorrenze_non_stimate": 15,
+      "occorrenze_non_stimate": 16,
       "stato": "aperto",
       "issue": null
     },
@@ -2928,10 +3018,16 @@
           "costo_usd": null,
           "nota": "[DAY-025] Primo portfolio_cycle 14:07:00, portfolio_cycle_late CRITICAL 13:30-14:08. HOOD +0,338 (13:51) sovrascritto alle 13:59 e GOOGL +0,303 (13:32) mai visti da un ciclo; un ciclo alle 13:52 avrebbe valutato HOOD. Costo gia' in F-023 (ALPHA_MISS 72,99): null.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-025]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-012] Primo ciclo 14:07:00 (37 min dopo l'apertura), mobile_events pipeline:portfolio_cycle_late CRITICAL 13:30:01 -> recovered 14:08:00.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 106.23,
-      "occorrenze_non_stimate": 25,
+      "occorrenze_non_stimate": 26,
       "stato": "aperto",
       "issue": null
     },
@@ -3031,10 +3127,16 @@
           "costo_usd": null,
           "nota": "[DAY-014] Stop AVGO creato 16:07:05, un ciclo dopo il BUY delle 15:52, qty 4 su 4,066 (98,4%); AMAT (-26,5/-28,3%) e WDC (-20,1/-21,7%) sub_one_share senza stop, 48 righe di log. Nessuno stop scattato.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-014]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-013] Stop: META 0,5906 sh nessuno; NOW 2/2,9791 (67%, un ciclo dopo), ARM 1/1,3104 (76%), HOOD 3/3,4023 (88%, un ciclo dopo), NVO 10/10,5912 (94%, un ciclo dopo). AMAT -21,4% e WDC -18,7% sub_one_share.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 35.9,
-      "occorrenze_non_stimate": 13,
+      "occorrenze_non_stimate": 14,
       "stato": "aperto",
       "issue": null
     },
@@ -3152,9 +3254,15 @@
           "costo_usd": null,
           "nota": "[DAY-030] HOOD 11568 +0,338 ISSUER_SPECIFIC -> 11578 +0,073 dopo 8 min, mai nel ranking. Costo gia' registrato da ALPHA_MISS (72,99): null.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-030]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": -0.97,
+          "nota": "[DAY-002] NVO: 11811 -0,435 (13:46, ensemble, crollo pre-market sui trial CagriSema) sostituito da 11824 +0,295 (14:02, titolo del Capital Markets Day, body_full = solo un URL); BUY 14:07 (decisione 35393, trade 1019) col titolo gia' a -7,4%, chiuso 15:52 a +0,97 $. Costo attribuito: senza il difetto nessun ingresso, P&L 0 invece di +0,97 -> -0,97.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
-      "costo_cumulato_usd": 111.17,
+      "costo_cumulato_usd": 110.2,
       "occorrenze_non_stimate": 9,
       "stato": "aperto",
       "issue": null
@@ -3816,10 +3924,16 @@
           "costo_usd": null,
           "nota": "[DAY-029] 96 intenti SKIP_PYRAMIDING (SHEL 24, PBR 24, NVO 21, MS 8, MRK 8, LLY 8, AMAT 3) contro 7 righe execution_decisions (2 senza signal_id). Costo gia' in ALPHA_MISS (37,89): null.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-029]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-005] 94 intenti SKIP_PYRAMIDING (GM 24, PBR 24, AMD 10, JPM 10, QQQ 8, NOK 5 ...), 7 righe in execution_decisions; NOK +0,333 bloccato da una posizione S1 da 6,12 $ (decisione 35679). Costo gia' nell'occorrenza ALPHA_MISS 2026-09-21: qui null.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 265.27,
-      "occorrenze_non_stimate": 2,
+      "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
     },
@@ -4583,10 +4697,16 @@
           "costo_usd": null,
           "nota": "[DAY-013] trades 373 WDC qty 2,9811 contro 0,3347 al broker (log #161 x24); dossier nozionale d'apertura WDC 0; reconcile 21:35 42 fully_held + 1 partially_wound_down_coheld, anomalies 0.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-013]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-027] UNH trade 279 qty 1,592634 vs broker 0,592634, quantity_remaining NULL; reconcile-positions 21:35 partially_wound_down_coheld 1, anomalies 0.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 10,
+      "occorrenze_non_stimate": 11,
       "stato": "aperto",
       "issue": null
     },
@@ -4730,10 +4850,16 @@
           "costo_usd": null,
           "nota": "[DAY-030] RANK_OUTSIDE_TOP_N su MRK 11673 (rank 6-7, 6 slot) e AMAT 11781 (rank 6, 2 slot), segnali di giorni prima su simboli gia' a libro.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-026] AMAT signal 11781 del 18/09 ancora nel ranking il 21/09 (dossier: 4 SKIP_PYRAMIDING, 20 RANK_OUTSIDE_TOP_N).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 220.87,
-      "occorrenze_non_stimate": 3,
+      "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
     },
@@ -5025,10 +5151,16 @@
           "costo_usd": null,
           "nota": "[DAY-006] system:market_clock CRITICAL aperto 17:31:10.427 e risolto 17:31:10.849 (durante il riavvio host); 22:50:00->22:50:01 portfolio_cycle_session_grid e held_no_news_loss:SBUX.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-006]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-024] 22:50:00 aperti e 22:50:01 risolti: portfolio_cycle_session_grid, held_no_news_loss:SBUX, held_no_news_loss:VALE.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 8,
+      "occorrenze_non_stimate": 9,
       "stato": "aperto",
       "issue": null
     },
@@ -5239,10 +5371,16 @@
           "costo_usd": null,
           "nota": "[DAY-019] 10 righe DECAY CRITICAL alle 21:00 solo nel log; nessuna riga mobile_events, nessun Telegram.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-019]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-019] 7 righe DECAY CRITICAL alle 21:00 solo nel log, nessuna riga mobile_events.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 12,
+      "occorrenze_non_stimate": 13,
       "stato": "aperto",
       "issue": null
     },
@@ -5444,10 +5582,16 @@
           "costo_usd": null,
           "nota": "[DAY-024] news_queue_drops enqueued_off_session=true: 518 duplicate_id, 135 stale (eta' mediana 3,6 h), 36 not_tradable drenati all'apertura.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-024]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-023] 295 articoli WS enqueued_off_session scartati stale nell'ora 13; 95 dispatch market_closed nella notte.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 19.18,
-      "occorrenze_non_stimate": 7,
+      "occorrenze_non_stimate": 8,
       "stato": "aperto",
       "issue": null
     },
@@ -5568,10 +5712,16 @@
           "costo_usd": null,
           "nota": "[DAY-008] BUY AVGO ED 33286 / trade 1017: signal_score 0,442 = 0,368 x 1,2 (moltiplicato) con velocity_multiplier NULL; il 17/09 BA persisteva il grezzo 0,274. Provenienza mista senza marcatura.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-008]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-025] execution_decisions 35393 NVO signal_score 0,295 persistito grezzo; il gate ha valutato 0,354 (velocity 1,2).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 5,
+      "occorrenze_non_stimate": 6,
       "stato": "aperto",
       "issue": "#550"
     },
@@ -5747,10 +5897,16 @@
           "costo_usd": null,
           "nota": "[DAY-003] Somma finbert_fallbacks dichiarati in seduta = 75; finbert_fallback_events 18/09 = 0 righe (63 single gpt-oss + 12 single glm). ED 32563 (SELL BA) chiama 'FinBERT fallback' il segnale ensemble 11447.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-003]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-008] 69/189 segnali fallback_used (46 single gpt-oss, 14 single glm, 9 FinBERT); somma finbert_fallbacks negli esiti task = 69 contro 9 righe finbert_fallback_events.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 7,
+      "occorrenze_non_stimate": 8,
       "stato": "aperto",
       "issue": null
     },
@@ -6004,10 +6160,16 @@
           "costo_usd": -114.99,
           "nota": "[DAY-001] 7 posizioni S4 nel target S1 congelato (INTC, PANW, XLE, MU, QQQ, MRVL, WDC) tenute con segnali ensemble freschi sotto gate (PANW -0,198, QQQ -0,219), solo SKIP_THRESHOLD; AVGO e NVO fuori target vendute below_entry_gate 19:37. Controfattuale (vendita al 2o ciclo dopo il primo segnale fresco sotto gate vs close, barre Alpaca SIP): INTC +5,37, PANW +26,28, XLE -2,20, MU +34,16, QQQ +8,90, MRVL +41,29, WDC +1,18 (qty broker 0,3347) = tenere ha reso +114,99 -> costo attribuito -114,99 (oggi il disarmo ha giovato).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-001]"
+        },
+        {
+          "data": "2026-09-21",
+          "costo_usd": null,
+          "nota": "[DAY-016] 7 posizioni S4 nel target S1 congelato (INTC, MRVL, PANW, CSCO, QQQ, XLE, MU) con intraday +183,41 $ (dossier snapshot_apertura); S1 'rebalance gate closed' 24/24 cicli. Controfattuale d'uscita non ricostruito: null.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
         }
       ],
       "costo_cumulato_usd": -182.03,
-      "occorrenze_non_stimate": 0,
+      "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
     },
