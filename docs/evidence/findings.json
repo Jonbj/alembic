@@ -2024,9 +2024,15 @@
           "costo_usd": -2.79,
           "nota": "[DAY-004] HOOD SELL 16:07 (decisione 36171, trade 1020, net +4,33) su segnale +0,183 TAG_UNCONFIRMED sotto il gate 0,30. Costo attribuito = drift_post_uscita del dossier -2,79 $ (l'uscita ha evitato la perdita).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
+        },
+        {
+          "data": "2026-09-23",
+          "costo_usd": 11.5,
+          "nota": "META venduta 14:22 @744,21 su below_entry_gate con score +0,101 (stesso segno dell'ingresso), pnl_net +9,96; ricomprata 18:07 @750,152 su signal 12390 +0,315 (trade 1027).",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-23.md §8"
         }
       ],
-      "costo_cumulato_usd": 66.46,
+      "costo_cumulato_usd": 77.96,
       "occorrenze_non_stimate": 6,
       "stato": "aperto",
       "issue": null
@@ -3767,9 +3773,15 @@
           "costo_usd": null,
           "nota": "[DAY-028] Ingresso AVGO 15:52: quota_movimento_precedente_al_segnale 0,835, quota_nel_gap 0,464, percentile 0,449; realizzato -3,03 non separabile dall'uscita F-008: null.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-028]"
+        },
+        {
+          "data": "2026-09-23",
+          "costo_usd": 13.88,
+          "nota": "BA entrata 16:22 con quota_movimento_precedente_al_segnale 1,99, entry_percentile 0,64, mtm_eod -13,88; META 18:07 denominatore_degenere, mtm_eod -11,71; BP segnale sopra gate a ritorno_sessione_al_segnale +2,92% su close +3,23%. Righe issuer-specifiche dei mover descrittive del movimento (PLTR, MCD, GOOGL).",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-23.md §8"
         }
       ],
-      "costo_cumulato_usd": 369.0,
+      "costo_cumulato_usd": 382.88,
       "occorrenze_non_stimate": 10,
       "stato": "aperto",
       "issue": null
@@ -3930,9 +3942,15 @@
           "costo_usd": null,
           "nota": "[DAY-005] 94 intenti SKIP_PYRAMIDING (GM 24, PBR 24, AMD 10, JPM 10, QQQ 8, NOK 5 ...), 7 righe in execution_decisions; NOK +0,333 bloccato da una posizione S1 da 6,12 $ (decisione 35679). Costo gia' nell'occorrenza ALPHA_MISS 2026-09-21: qui null.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
+        },
+        {
+          "data": "2026-09-23",
+          "costo_usd": -4.46,
+          "nota": "BP (+3,23%, detenuta S1 831,25 $) con segnale S4 12382 +0,375 sopra gate e segno giusto bloccato 9 volte 17:52-19:52. 55/77 intenti tradabili SKIP_PYRAMIDING (71,4%): NOW 24 (S4), SOXX 12, GM 9, BP 9 (S1), META 1 (S4); 30/55 su simboli S1; guard_decisions traccia 2/55 (3,6%).",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-23.md §8"
         }
       ],
-      "costo_cumulato_usd": 265.27,
+      "costo_cumulato_usd": 260.81,
       "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
