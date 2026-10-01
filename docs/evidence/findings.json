@@ -2084,9 +2084,15 @@
           "costo_usd": null,
           "nota": "[DAY-003] META (trade 1025) venduta 14:22 @744,21 su below_entry_gate con segnale +0,101 (14:11) e ricomprata 18:07 @750,152 (trade 1027, segnale 12390 +0,315). Stesso episodio gia' costato 11,50 dall'ALPHA_MISS_REPORT_2026-09-23 §8: null qui per non contarlo due volte.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-23.md §10"
+        },
+        {
+          "data": "2026-09-24",
+          "costo_usd": 1.04,
+          "nota": "META (trade 1027) venduta 14:22 @766,52 su below_entry_gate con segnale 12477 +0,131 ISSUER_SPECIFIC ('Citizens ... Raises Price Target to $885', pubbl. 13:11, ingerito 14:20), pnl_net +31,38, drift_post_uscita 21,42, exit_active_effect_usd -21,42; ricomprata 15:37 @767,07 (trade 1028, segnale 12532 +0,306 JPMorgan PT $920).",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-24.md §8"
         }
       ],
-      "costo_cumulato_usd": 77.96,
+      "costo_cumulato_usd": 79.0,
       "occorrenze_non_stimate": 7,
       "stato": "aperto",
       "issue": null
@@ -3368,9 +3374,15 @@
           "costo_usd": -0.97,
           "nota": "[DAY-002] NVO: 11811 -0,435 (13:46, ensemble, crollo pre-market sui trial CagriSema) sostituito da 11824 +0,295 (14:02, titolo del Capital Markets Day, body_full = solo un URL); BUY 14:07 (decisione 35393, trade 1019) col titolo gia' a -7,4%, chiuso 15:52 a +0,97 $. Costo attribuito: senza il difetto nessun ingresso, P&L 0 invece di +0,97 -> -0,97.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-21.md §10"
+        },
+        {
+          "data": "2026-09-24",
+          "costo_usd": 1.28,
+          "nota": "META trade 1028 chiusa 18:52 @776,91 (execution_decisions 45066, below_entry_gate, generated 18:35 score +0.000): il segnale 12628 +0,2925 ISSUER_SPECIFIC ('Raymond James ... Raises Price Target to $860', 18:27) e' sovrascritto da 12637 0,000 conf 0,20 attribution FANOUT ('Why Is AST SpaceMobile Stock Surging on Thursday?', taggato META e GOOGL, 18:35). pnl_net +18,26.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-24.md §8"
         }
       ],
-      "costo_cumulato_usd": 110.2,
+      "costo_cumulato_usd": 111.48,
       "occorrenze_non_stimate": 9,
       "stato": "aperto",
       "issue": null
@@ -5356,9 +5368,15 @@
           "costo_usd": 13.46,
           "nota": "[DAY-002] BA #1015 chiusa 14:22 @196,39 (fallback_filtered) perche' l'ultima lettura era single gpt-oss +0,04/conf 0,40 (11478), esclusa dal BUY ma usata come controsegnale: FIX-D non ha preservato l'ensemble +0,359 (11447). Controfattuale: vendita al primo ensemble fresco sotto gate (18:02 +0,075) con isteresi 2 cicli = 18:22 @198,26; 7,1955 x (198,26-196,39) = 13,46 (attribuita).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-002]"
+        },
+        {
+          "data": "2026-09-24",
+          "costo_usd": 3.31,
+          "nota": "BA (trade 1026, ingresso 23/09 su ensemble 12338 +0,315) chiusa 15:37 @196,34, pnl_net -40,49, exit_reason fallback_filtered: ultima lettura 12527 single:gpt-oss fallback -0,04 conf 0,40 (15:14, TAG_UNCONFIRMED); log worker 15:22/15:37 'dropped fallback signal(s) from BUY ranking' include BA e FIX-D preserva 8 stantii senza BA. La reason persistita cita il segnale 12338 non-fallback: la causa reale non e' ricostruibile da execution_decisions.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-24.md §8"
         }
       ],
-      "costo_cumulato_usd": 13.46,
+      "costo_cumulato_usd": 16.77,
       "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
