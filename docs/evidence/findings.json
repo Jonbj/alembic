@@ -242,9 +242,15 @@
           "costo_usd": null,
           "nota": "DAY-029: 31/96 simboli senza righe news_log (42 il 23/09, discontinuita' alias #566); allerta >=5 sedute HD, INFY, JD, MMM, SAP, SNOW, VALE; 3 posizioni cieche lato uscita (VALE, UBS, CSCO) per 3.184,87 $.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-24.md §10"
+        },
+        {
+          "data": "2026-09-25",
+          "costo_usd": 4.97,
+          "nota": "watchlist_zero_news 40/96 (31 il 24/09), effective-timely 35/96; materials 0/2, telecom 1/5; copertura_uscita 3 cieche (AMAT -18,32%, VALE -7,04%, CSCO -4,29% da ingresso), notional_cieco 2.958,41; allerta >=5 sedute: HD, JD, PG, RDDT, SAP, SNOW, VALE.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-25.md §8"
         }
       ],
-      "costo_cumulato_usd": 5247.64,
+      "costo_cumulato_usd": 5252.61,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 9
@@ -3482,9 +3488,15 @@
           "costo_usd": null,
           "nota": "DAY-005: META SELL 18:52 (45066) su 12637 0,000 FANOUT che sovrascrive 12628 +0,293. Costo gia' registrato dall'alpha-miss (1,28 $): null.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-24.md §10"
+        },
+        {
+          "data": "2026-09-25",
+          "costo_usd": -23.26,
+          "nota": "3/3 SELL S4 below_entry_gate su segnale piu' recente da articolo fan-out positivo: ARM +0,035 (BofA su AMD, 14:49), HOOD +0,021 ('Forget Bitcoin, XRP', 14:28), MSFT +0,165 (SemiAnalysis su NVDA, 16:43), ciascuno sovrascrive un ingresso +0,3225/+0,3225/+0,31.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-25.md §8"
         }
       ],
-      "costo_cumulato_usd": 111.48,
+      "costo_cumulato_usd": 88.22,
       "occorrenze_non_stimate": 10,
       "stato": "aperto",
       "issue": null
@@ -6544,9 +6556,15 @@
           "costo_usd": -93.13,
           "nota": "DAY-001: INTC/MU/PANW/QQQ/WDC (S4, nel target S1 congelato al 01/09) ricevono segnali ensemble freschi sotto gate (QQQ 12441 -0,128 13:36; MU 12450 +0,169 13:44; WDC 12460 -0,110 13:57; INTC 12479 0,000 14:20; PANW 12526 +0,005 15:13) e non escono, mentre META/NOW/BA escono alla stessa regola. Vendita al 2o ciclo (open barra) vs close: INTC 124,10->127,39 +47,78; MU 1052,46->1080,53 +41,08; QQQ 737,03->741,10 +8,44; PANW 390,38->389,92 -1,78; WDC 457,45->450,31 -2,39 = +93,13 tenendo (attribuita). S4 giorno ~+89,7 $ sarebbe ~-3 $ alla regola. Il checklist alpha-miss del 24/09 la dava not_exposed (solo CSCO).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-24.md §10"
+        },
+        {
+          "data": "2026-09-25",
+          "costo_usd": 33.74,
+          "nota": "INTC (trade 1007) e PANW (trade 1001), S4 detenute (nel target S1 per il report del 22/09), ricevono alle 17:35 i segnali freschi 12802/12805 a 0,000 (fan-out 'Whale Alerts') e restano 11 cicli SKIP_THRESHOLD 17:37-19:52 senza flag 'Exit hysteresis' ne' SELL; ARM, HOOD, MSFT fuori target segnate e vendute alla stessa regola below_entry_gate. actual_intraday_pnl_usd INTC -55,63, PANW -51,17.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-25.md §8"
         }
       ],
-      "costo_cumulato_usd": -351.08,
+      "costo_cumulato_usd": -317.34,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
