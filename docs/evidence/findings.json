@@ -2192,9 +2192,15 @@
           "costo_usd": -34.03,
           "nota": "DAY-005: 4 round-trip S4 nella stessa seduta, tutti chiusi below_entry_gate dopo l'hold minimo: INFY (1046) su +0,259, MSFT (1048) su -0,006, SPCX (1047) su +0,009, HOOD (1049) su +0,018; netto -26,98. Controfattuale hold fino alla chiusura (IEX): INFY 11,345, MSFT 512,71, SPCX 148,10, HOOD 111,18 -> uscire ha fatto risparmiare 4,66+5,31+16,59+7,47 = 34,03 $ (costo negativo).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-01.md §10"
+        },
+        {
+          "data": "2026-09-28",
+          "costo_usd": 6.76,
+          "nota": "NVDA (trade 1032) venduta 14:52 below_entry_gate (decisione 48841) sul -0,006 delle 14:23 da un articolo su Anthropic Claude, pnl_net +27,98; ricomprata 18:22 (trade 1034, decisione 50352) sul +0,405 x velocity 1,20 del buyback record, entry 230,18, mtm_eod -8,45.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-28.md §8"
         }
       ],
-      "costo_cumulato_usd": 44.97,
+      "costo_cumulato_usd": 51.73,
       "occorrenze_non_stimate": 8,
       "stato": "aperto",
       "issue": null
@@ -5662,9 +5668,15 @@
           "costo_usd": null,
           "nota": "DAY-006: BA SELL 15:37 fallback_filtered sulla lettura single 12527 -0,04; alle 18:52 la single META 12646 +0,163 e' invece ignorata. Costo gia' registrato dall'alpha-miss (3,31 $): null.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-24.md §10"
+        },
+        {
+          "data": "2026-09-28",
+          "costo_usd": -3.19,
+          "nota": "COST (trade 1033) liquidata 14:22 (decisione 48626, [fallback_filtered]) sulla lettura FinBERT fallback +0,040 delle 13:58, esclusa dal ranking (#108) e quindi a peso 0; pnl_net +4,74.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-28.md §8"
         }
       ],
-      "costo_cumulato_usd": 16.77,
+      "costo_cumulato_usd": 13.58,
       "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
@@ -6748,9 +6760,15 @@
           "costo_usd": null,
           "nota": "DAY-012: col ribilanciamento S1 del 01/10 CSCO, INTC, MRVL, MU, QQQ, PANW e WDC (trade S4 aperti) entrano nel target S1 congelato per un mese; alle 14:07 l'isteresi le segnala in uscita, alle 14:22 vengono vendute solo le 8 posizioni S1 a peso 0.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-01.md §10"
+        },
+        {
+          "data": "2026-09-28",
+          "costo_usd": -9.44,
+          "nota": "INTC (S4, trade 1007, -5,67%, actual_intraday_pnl -67,46) riceve alle 16:56 il segnale fresco 12988 -0,184 non-fallback ('Why Is Intel Stock Falling on Monday?'), eligible 17:07, e resta 12 cicli SKIP_THRESHOLD 17:07-19:52 senza flag 'Exit hysteresis' ne' SELL; NVDA fuori target e' flaggata alle 14:37 e venduta alle 14:52 su un -0,006. Il dossier riporta per INTC score_firmato +0,102 (EXIT_WRONG_SIGN), non riconciliato col -0,184 di execution_decisions.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-28.md §8"
         }
       ],
-      "costo_cumulato_usd": -317.34,
+      "costo_cumulato_usd": -326.78,
       "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
