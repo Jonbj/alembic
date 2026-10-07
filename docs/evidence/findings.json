@@ -1372,9 +1372,15 @@
           "costo_usd": 24.93,
           "nota": "ORCL +3,91% score firmato +0,131 e ARM +3,65% +0,045 sotto gate 0,30 con segno corretto; active_signal_recall 1/3.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-29.md §8"
+        },
+        {
+          "data": "2026-09-30",
+          "costo_usd": 68.91,
+          "nota": "NOW +3,13% con score +0,199 sotto gate 0,30, segno corretto; active_signal_recall 0/1.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-30.md §8"
         }
       ],
-      "costo_cumulato_usd": 2558.0,
+      "costo_cumulato_usd": 2626.91,
       "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
@@ -1770,10 +1776,16 @@
           "costo_usd": null,
           "nota": "DAY-012: 3/3 SELL (46491, 46612, 46980) con signal_id NULL; dossier decision_signal_id_coverage.regressions=['SELL'].",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-09-30",
+          "costo_usd": null,
+          "nota": "4/4 SELL senza signal_id; regressions=['SELL'].",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-30.md §8"
         }
       ],
       "costo_cumulato_usd": 0.0,
-      "occorrenze_non_stimate": 32,
+      "occorrenze_non_stimate": 33,
       "stato": "aperto",
       "issue": null
     },
@@ -4229,9 +4241,15 @@
           "costo_usd": 15.8,
           "nota": "DAY-006: ARM BUY 14:07 @321,95 (trade 1029) su notizia pubbl. 12:14, quota_nel_gap 3,06, entry_percentile 0,77: net -29,19. Stesso pattern MSFT 14:37 (GDELT 'Microsoft Shares Jump 3.15%', quota 0,87, net +11,27) e COST 17:52 (quota 0,96, percentile 0,91, mtm_eod +2,12). Costo = 29,19 - 11,27 - 2,12 = 15,80 (misurata sui trade 1029/1031, mtm per COST).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-09-30",
+          "costo_usd": 34.75,
+          "nota": "HOOD ingresso 14:07 con quota precedente 0,708 su articoli 12:56-13:45Z; BA 14:22 quota 0,40.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-30.md §8"
         }
       ],
-      "costo_cumulato_usd": 400.86,
+      "costo_cumulato_usd": 435.61,
       "occorrenze_non_stimate": 11,
       "stato": "aperto",
       "issue": null
