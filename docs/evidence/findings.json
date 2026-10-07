@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "prossimo_id": 92,
+  "prossimo_id": 93,
   "findings": [
     {
       "id": "F-001",
@@ -1559,10 +1559,16 @@
           "costo_usd": null,
           "nota": "DAY-017: 54 dei 101 segnali ensemble senza nessuna risposta eligible=true (47 con 2/2, 0 con 1/2); glm-5.3 sotto floor 122/172.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-09-28",
+          "costo_usd": null,
+          "nota": "[DAY-015] llm_responses.eligible=false su 169/238 per ciascuno dei due modelli (71%).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
         }
       ],
       "costo_cumulato_usd": 54.48,
-      "occorrenze_non_stimate": 21,
+      "occorrenze_non_stimate": 22,
       "stato": "aperto",
       "issue": null
     },
@@ -1782,10 +1788,16 @@
           "costo_usd": null,
           "nota": "4/4 SELL senza signal_id; regressions=['SELL'].",
           "fonte": "ALPHA_MISS_REPORT_2026-09-30.md §8"
+        },
+        {
+          "data": "2026-09-28",
+          "costo_usd": null,
+          "nota": "[DAY-003] Entrambi i SELL del 28/09 (dec. 48626, 48841) con signal_id NULL: 0/2 nel dossier decision_signal_id_coverage.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
         }
       ],
       "costo_cumulato_usd": 0.0,
-      "occorrenze_non_stimate": 33,
+      "occorrenze_non_stimate": 34,
       "stato": "aperto",
       "issue": null
     },
@@ -2047,10 +2059,16 @@
           "costo_usd": null,
           "nota": "ORCL: 5 righe su 8 fan-out (quota 0,625); cause_del_giorno quota_righe_fanout 0,556; TAG_UNCONFIRMED 153/258 righe news_log.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-29.md §8"
+        },
+        {
+          "data": "2026-09-28",
+          "costo_usd": null,
+          "nota": "[DAY-010] MCD -0,42 (segnale 13063) da articolo su Alphabet; SPY -0,42 (13021) da articolo Fed; 129/250 mapping TAG_UNCONFIRMED. Nessun ordine derivato.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
         }
       ],
       "costo_cumulato_usd": 937.61,
-      "occorrenze_non_stimate": 31,
+      "occorrenze_non_stimate": 32,
       "stato": "aperto",
       "issue": null
     },
@@ -2662,10 +2680,16 @@
           "costo_usd": null,
           "nota": "DAY-013: decision_price NULL su 8/8 decisioni d'ordine; trades.slippage_est = cost_usd su 1029-1033 (0,82/0,82/0,30/0,30/0,82).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-09-28",
+          "costo_usd": null,
+          "nota": "[DAY-014] slippage_est == cost_usd su trade 1032/1033/1034 (0,299/0,818/0,296).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 32,
+      "occorrenze_non_stimate": 33,
       "stato": "aperto",
       "issue": null
     },
@@ -2862,10 +2886,16 @@
           "costo_usd": null,
           "nota": "DAY-005: detect_regime 07:00:56 e 13:36:34 'LLM-2 failed in regime detection: Ollama API error 410: Gone' (REGIME_LLM_MODEL_2 default qwen3.5:cloud), poi 'Regime detected: sideways (x0.7), disagreement=False' con r2=r1: regime da un solo modello, guardia di disaccordo disarmata, task succeeded, nessun alert. Prima comparsa del 410 nei log (assente il 24/09).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-09-28",
+          "costo_usd": null,
+          "nota": "[DAY-013] FRED VIXCLS 500 alle 07:00:05, detect_regime succeeded: None, nessun alert.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
         }
       ],
       "costo_cumulato_usd": 52.35,
-      "occorrenze_non_stimate": 10,
+      "occorrenze_non_stimate": 11,
       "stato": "aperto",
       "issue": null
     },
@@ -2971,10 +3001,16 @@
           "costo_usd": null,
           "nota": "DAY-021: URL api.telegram.org/bot<token> in 17.179 righe dei log worker/worker-inference del 25/09; 'api_key=' (FRED) in 4 righe.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-09-28",
+          "costo_usd": null,
+          "nota": "[DAY-006] Bot token Telegram in 17.269 righe getUpdates; in piu' api_key FRED nell'URL dell'errore 500 delle 07:00:05 (worker log).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 16,
+      "occorrenze_non_stimate": 17,
       "stato": "aperto",
       "issue": null
     },
@@ -3553,10 +3589,16 @@
           "costo_usd": null,
           "nota": "DAY-010: stop protettivi ARM 4/4,620 (86,6%, creato 14:22, un ciclo dopo l'ingresso), HOOD 12/12,53 (14:37, un ciclo dopo), MSFT 2/2,896 (69,1%, 14:52, un ciclo dopo), NVDA 6/6,606 (17:07, un ciclo dopo), COST 1/1,612 (62,0%, stesso ciclo). #161: 11/44 posizioni sub-one-share senza stop, AMAT -18/-19%, WDC -17%.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-09-28",
+          "costo_usd": null,
+          "nota": "[DAY-012] Stop NVDA creato 18:37:05, 15 min dopo il BUY delle 18:22; qty 6 su 6,3995 (93,8%).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
         }
       ],
       "costo_cumulato_usd": 35.9,
-      "occorrenze_non_stimate": 18,
+      "occorrenze_non_stimate": 19,
       "stato": "aperto",
       "issue": null
     },
@@ -3710,10 +3752,16 @@
           "costo_usd": null,
           "nota": "DAY-007: SELL ARM 15:52 (+0,035 da articolo BofA su AMD), HOOD 16:07 (+0,021 'Forget Bitcoin, XRP'), MSFT 16:52 (+0,165 SemiAnalysis su NVDA): ogni ultimo segnale fan-out positivo sovrascrive l'ingresso. Costo gia' registrato dall'alpha-miss del 25/09 (-23,26) -> null qui.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-09-28",
+          "costo_usd": null,
+          "nota": "[DAY-001] NVDA: +0,405 delle 13:44 sovrascritto alle 14:23 da -0,006 (segnale 12888, articolo Anthropic); SELL 14:52 (dec. 48841); ricompra 18:22 su segnale 13053. Costo gia' contato in F-013 dall'alpha-miss: non ricontato.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
         }
       ],
       "costo_cumulato_usd": 88.22,
-      "occorrenze_non_stimate": 12,
+      "occorrenze_non_stimate": 13,
       "stato": "aperto",
       "issue": null
     },
@@ -4440,10 +4488,16 @@
           "costo_usd": -5.43,
           "nota": "DAY-009: AMD 12722 +0,390 (S1 a libro dal 14/07) SKIP_PYRAMIDING 21 intenti 14:52-19:52, 1 riga execution_decisions; WDC 12753 +0,338 18 intenti (residuo S4 0,3347 az.), 1 riga. Congetturale AMD: 2.200 $ / 631,91 x (630,35 - 631,91) = -5,43 (il blocco ha evitato una perdita).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-09-28",
+          "costo_usd": null,
+          "nota": "[DAY-011] 8 SKIP_PYRAMIDING su ABBV, XOM, XLE, PANW con segnali +0,30/+0,42; ABBV $764 contro target $2.960.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
         }
       ],
       "costo_cumulato_usd": 231.06,
-      "occorrenze_non_stimate": 4,
+      "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
     },
@@ -5824,10 +5878,16 @@
           "costo_usd": -3.19,
           "nota": "COST (trade 1033) liquidata 14:22 (decisione 48626, [fallback_filtered]) sulla lettura FinBERT fallback +0,040 delle 13:58, esclusa dal ranking (#108) e quindi a peso 0; pnl_net +4,74.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-28.md §8"
+        },
+        {
+          "data": "2026-09-28",
+          "costo_usd": null,
+          "nota": "[DAY-002] COST SELL 14:22 (dec. 48626, trade 1033) su FinBERT fallback +0,040; costo -3,19 gia' in F-059 dall'alpha-miss: non ricontato.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
         }
       ],
       "costo_cumulato_usd": 13.58,
-      "occorrenze_non_stimate": 5,
+      "occorrenze_non_stimate": 6,
       "stato": "aperto",
       "issue": null
     },
@@ -6025,10 +6085,16 @@
           "costo_usd": null,
           "nota": "DAY-019: le 8 righe DECAY CRITICAL delle 21:00 restano nel log; nessuna riga mobile_events.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-09-28",
+          "costo_usd": null,
+          "nota": "[DAY-016] 7 righe DECAY CRITICAL S1/S2/S4 alle 21:00 solo nel log; nessun mobile_event.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 17,
+      "occorrenze_non_stimate": 18,
       "stato": "aperto",
       "issue": null
     },
@@ -6260,10 +6326,16 @@
           "costo_usd": null,
           "nota": "DAY-024: 183 articoli WS enqueued_off_session scartati stale 13:33:11-13:38:08 (eta' mediana 6,9 h) + 30 not_tradable; 84 dispatch run_sentiment_worker 'market_closed' fuori seduta. 42 articoli pre-apertura scorati comunque all'apertura (ingest->segnale mediana 86 min).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-09-28",
+          "costo_usd": null,
+          "nota": "[DAY-009] 237 articoli notturni saltati come stale alle 13:34:18 (ingestion_stats_daily.discarded_stale=237).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
         }
       ],
       "costo_cumulato_usd": 19.18,
-      "occorrenze_non_stimate": 12,
+      "occorrenze_non_stimate": 13,
       "stato": "aperto",
       "issue": null
     },
@@ -6617,10 +6689,16 @@
           "costo_usd": null,
           "nota": "DAY-015: esiti task sentiment sommano finbert_fallbacks 77 contro 3 righe finbert_fallback_events (COST, SPY, META): 68 single gpt-oss + 6 single glm + 3 FinBERT.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-09-28",
+          "costo_usd": null,
+          "nota": "[DAY-005] fallback_used=true su 125/250 segnali, solo 9 eventi in finbert_fallback_events.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 12,
+      "occorrenze_non_stimate": 13,
       "stato": "aperto",
       "issue": null
     },
@@ -6791,10 +6869,16 @@
           "costo_usd": null,
           "nota": "DAY-003: /api/trades dichiara ARM entry 288,54 gross +126,00 (ledger 1029: 321,95, -28,37), HOOD 115,45 +42,11 (ledger +1,66), MSFT 513,26 +13,72 (ledger +11,57): somma +181,82 contro -15,14 lordi del ledger; segno invertito su ARM. /api/orders lega le 3 SELL a signal_id/decision_id dell'ingresso.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-09-28",
+          "costo_usd": null,
+          "nota": "[DAY-004] /api/trades: NVDA 1032 gross/net -6,98 contro +28,28/+27,98 nel DB; COST 1033 senza P&L (DB +5,56/+4,74).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 9,
+      "occorrenze_non_stimate": 10,
       "stato": "aperto",
       "issue": null
     },
@@ -6841,10 +6925,16 @@
           "costo_usd": null,
           "nota": "[DAY-014] Nessuna latenza persistita (llm_responses senza colonna di latenza); unica traccia 17 righe 'Ollama timeout' (9 gpt-oss, 8 glm) fra 13:39 e 19:15. Uptime dedotto per assenza: 0 h di downtime. Occorrenza anteriore al primo avvistamento: primo_avvistamento portato al 2026-09-09.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-014]"
+        },
+        {
+          "data": "2026-09-28",
+          "costo_usd": null,
+          "nota": "[DAY-008] 26 timeout Ollama 90s (gpt-oss 14, glm-5.3 12); nessuna traccia di trasporto/latenza.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 2,
+      "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
     },
@@ -6970,10 +7060,16 @@
           "costo_usd": 3.57,
           "nota": "DAY-001: oltre a INTC/PANW (costo gia' registrato dall'alpha-miss del 25/09, qui non ricontato), MU S4 (trade 1014) riceve l'ensemble 12727 +0,055 alle 14:58 e resta a libro tutta la seduta senza 'Exit hysteresis'; ARM/HOOD/MSFT fuori target escono alla stessa regola. Costo solo MU: 1,4634 x (1084,13 al ciclo eleggibile 15:07 - 1081,69 close) = 3,57 (attribuita).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-09-28",
+          "costo_usd": null,
+          "nota": "[DAY-017] INTC S4 (trade 1007) senza uscita S4 con segnale fresco -0,184 (16:56); costo -9,44 gia' contato dall'alpha-miss: non ricontato.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
         }
       ],
       "costo_cumulato_usd": -323.21,
-      "occorrenze_non_stimate": 2,
+      "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
     },
@@ -7024,6 +7120,25 @@
       ],
       "costo_cumulato_usd": -3.39,
       "occorrenze_non_stimate": 0,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-092",
+      "titolo": "L'approvazione/rifiuto dei pesi ensemble via Telegram scrive source='telegram'/'rejected_via_telegram' in weight_update_log, ma il CHECK ammette solo suggestion/override/expired/auto_apply/freeze: i pesi vanno in Redis, l'audit fallisce e l'errore resta solo nel log",
+      "tipo": "difetto",
+      "confidenza": "misurata",
+      "primo_avvistamento": "2026-09-28",
+      "occorrenze": [
+        {
+          "data": "2026-09-28",
+          "costo_usd": null,
+          "nota": "[DAY-007] 05:35:33 CheckViolation weight_update_log_source_check, riga fallita id 23 source telegram; set_ensemble_weights (telegram_poller.py:424) precede INSERT audit (:432). Nuovo id: nessun finding esistente copre weight_update_log. Costo non stimabile (nessun trade attribuibile).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
+        }
+      ],
+      "costo_cumulato_usd": 0,
+      "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
     }
