@@ -1378,9 +1378,15 @@
           "costo_usd": 68.91,
           "nota": "NOW +3,13% con score +0,199 sotto gate 0,30, segno corretto; active_signal_recall 0/1.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-30.md §8"
+        },
+        {
+          "data": "2026-10-01",
+          "costo_usd": 68.23,
+          "nota": "CRM +3,10% con max_score_fanout +0,2136 < gate 0,30, segno corretto, articolo fan-out su Accenture.",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-01.md §8"
         }
       ],
-      "costo_cumulato_usd": 2626.91,
+      "costo_cumulato_usd": 2695.14,
       "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
