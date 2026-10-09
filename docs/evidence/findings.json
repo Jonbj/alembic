@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "prossimo_id": 93,
+  "prossimo_id": 94,
   "findings": [
     {
       "id": "F-001",
@@ -260,9 +260,15 @@
           "costo_usd": null,
           "nota": "DAY-027: watchlist_zero_news 40/96, effective-timely 35/96, 3 posizioni cieche lato uscita (AMAT, VALE, CSCO). Costo gia' registrato dall'alpha-miss del 25/09 (4,97) -> null qui.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-10-02",
+          "costo_usd": 264.19,
+          "nota": "watchlist_zero_news 68/96; SPCX e TSLA mover senza alcuna riga news_log.",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-02.md §8"
         }
       ],
-      "costo_cumulato_usd": 5252.61,
+      "costo_cumulato_usd": 5516.8,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 11
@@ -1094,12 +1100,18 @@
           "costo_usd": null,
           "nota": "DAY-023: ingestion_stats_daily alpaca_benzinga fetched 745, queued 470, duplicates 3.882 (news_queue_drops duplicate_id: 2.551 rest + 1.331 ws).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-09-29",
+          "costo_usd": null,
+          "nota": "ingestion_stats_daily alpaca_benzinga: fetched 939, duplicates 4302.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-008"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 35
+      "occorrenze_non_stimate": 36
     },
     {
       "id": "F-008",
@@ -1384,9 +1396,15 @@
           "costo_usd": 68.23,
           "nota": "CRM +3,10% con max_score_fanout +0,2136 < gate 0,30, segno corretto, articolo fan-out su Accenture.",
           "fonte": "ALPHA_MISS_REPORT_2026-10-01.md §8"
+        },
+        {
+          "data": "2026-10-02",
+          "costo_usd": 73.62,
+          "nota": "AVGO +3,35% con score_firmato +0,2136 < gate 0,30, segno corretto; active_signal_recall 0/2.",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-02.md §8"
         }
       ],
-      "costo_cumulato_usd": 2695.14,
+      "costo_cumulato_usd": 2768.76,
       "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
@@ -1571,10 +1589,16 @@
           "costo_usd": null,
           "nota": "[DAY-015] llm_responses.eligible=false su 169/238 per ciascuno dei due modelli (71%).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
+        },
+        {
+          "data": "2026-09-29",
+          "costo_usd": null,
+          "nota": "llm_responses.eligible vero solo 68/258 per modello (glm-5.3 e gpt-oss) il 29/09; 118 segnali single:gpt-oss.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-006"
         }
       ],
       "costo_cumulato_usd": 54.48,
-      "occorrenze_non_stimate": 22,
+      "occorrenze_non_stimate": 23,
       "stato": "aperto",
       "issue": null
     },
@@ -2071,10 +2095,16 @@
           "costo_usd": null,
           "nota": "[DAY-010] MCD -0,42 (segnale 13063) da articolo su Alphabet; SPY -0,42 (13021) da articolo Fed; 129/250 mapping TAG_UNCONFIRMED. Nessun ordine derivato.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
+        },
+        {
+          "data": "2026-09-29",
+          "costo_usd": null,
+          "nota": "Segnale 13204 C +0,450 (single gpt-oss, glm 0,00) su articolo 'Coinbase Wins CFTC Approval' (news_log 13205, source_metadata); nessun ordine (SKIP_FALLBACK 53652). Errore di tagging non provabile.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-005"
         }
       ],
       "costo_cumulato_usd": 937.61,
-      "occorrenze_non_stimate": 32,
+      "occorrenze_non_stimate": 33,
       "stato": "aperto",
       "issue": null
     },
@@ -2288,9 +2318,15 @@
           "costo_usd": 6.76,
           "nota": "NVDA (trade 1032) venduta 14:52 below_entry_gate (decisione 48841) sul -0,006 delle 14:23 da un articolo su Anthropic Claude, pnl_net +27,98; ricomprata 18:22 (trade 1034, decisione 50352) sul +0,405 x velocity 1,20 del buyback record, entry 230,18, mtm_eod -8,45.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-28.md §8"
+        },
+        {
+          "data": "2026-09-29",
+          "costo_usd": 6.38,
+          "nota": "NVDA SELL 14:22 @229,617 -> BUY 15:52 @230,582 -> SELL 17:52 su +0,000. Costo = (230,5816-229,6169)*6,3063=6,08 + cost_usd ingresso extra 0,29 (trade 1037, decisioni 51209/51835/52732). Tutti e 3 i SELL del giorno con score >=0.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-002"
         }
       ],
-      "costo_cumulato_usd": 51.73,
+      "costo_cumulato_usd": 58.11,
       "occorrenze_non_stimate": 8,
       "stato": "aperto",
       "issue": null
@@ -2813,10 +2849,16 @@
           "costo_usd": null,
           "nota": "DAY-022: 'SPY benchmark fetch failed: subscription does not permit querying recent SIP data' x95, nessun alert.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-09-29",
+          "costo_usd": null,
+          "nota": "84 warning 'SPY benchmark fetch failed: subscription does not permit querying recent SIP data' nel worker.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-011"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 18,
+      "occorrenze_non_stimate": 19,
       "stato": "aperto",
       "issue": "#444"
     },
@@ -2898,10 +2940,16 @@
           "costo_usd": null,
           "nota": "[DAY-013] FRED VIXCLS 500 alle 07:00:05, detect_regime succeeded: None, nessun alert.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
+        },
+        {
+          "data": "2026-09-29",
+          "costo_usd": null,
+          "nota": "07:00:17 'Failed to fetch macro data for regime detection: read operation timed out', nessun alert.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-011"
         }
       ],
       "costo_cumulato_usd": 52.35,
-      "occorrenze_non_stimate": 11,
+      "occorrenze_non_stimate": 12,
       "stato": "aperto",
       "issue": null
     },
@@ -3013,10 +3061,16 @@
           "costo_usd": null,
           "nota": "[DAY-006] Bot token Telegram in 17.269 righe getUpdates; in piu' api_key FRED nell'URL dell'errore 500 delle 07:00:05 (worker log).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
+        },
+        {
+          "data": "2026-09-29",
+          "costo_usd": null,
+          "nota": "17267 righe con token Telegram e 3 con api_key= in worker-inference-2026-09-29.log.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-010"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 17,
+      "occorrenze_non_stimate": 18,
       "stato": "aperto",
       "issue": null
     },
@@ -3462,10 +3516,16 @@
           "costo_usd": null,
           "nota": "DAY-028: primo portfolio-cycle 14:07:00 (portfolio_cycle_late 13:30:01-14:08:01). ARM +0,323 (13:40:59) entra alle 14:07 invece che al ciclo 13:52; prezzo 13:52 non ricostruito -> costo non stimato.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-09-29",
+          "costo_usd": null,
+          "nota": "Primo tick portfolio 14:07 con apertura 13:30 EDT; critical portfolio_cycle_late 13:30.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-013"
         }
       ],
       "costo_cumulato_usd": 96.72,
-      "occorrenze_non_stimate": 28,
+      "occorrenze_non_stimate": 29,
       "stato": "aperto",
       "issue": null
     },
@@ -3601,10 +3661,16 @@
           "costo_usd": null,
           "nota": "[DAY-012] Stop NVDA creato 18:37:05, 15 min dopo il BUY delle 18:22; qty 6 su 6,3995 (93,8%).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
+        },
+        {
+          "data": "2026-09-29",
+          "costo_usd": null,
+          "nota": "Stop META 2/2,017, SPCX 9/9,754, NVDA 6/6,306 creati 15-30 min dopo l'ingresso; WDC unprotected -18,1% sub_one_share (3 warning).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-014"
         }
       ],
       "costo_cumulato_usd": 35.9,
-      "occorrenze_non_stimate": 19,
+      "occorrenze_non_stimate": 20,
       "stato": "aperto",
       "issue": null
     },
@@ -3764,10 +3830,16 @@
           "costo_usd": null,
           "nota": "[DAY-001] NVDA: +0,405 delle 13:44 sovrascritto alle 14:23 da -0,006 (segnale 12888, articolo Anthropic); SELL 14:52 (dec. 48841); ricompra 18:22 su segnale 13053. Costo gia' contato in F-013 dall'alpha-miss: non ricontato.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
+        },
+        {
+          "data": "2026-09-29",
+          "costo_usd": null,
+          "nota": "NVDA uscita 14:22 su segnale 13133 +0,019 conf 0,25 e 17:52 su 13260 +0,000 conf 0,15 con posizione aperta su +0,405/+0,354; il drift post-uscita e' negativo (uscite non costose), controfattuale non stimato.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-003"
         }
       ],
       "costo_cumulato_usd": 88.22,
-      "occorrenze_non_stimate": 13,
+      "occorrenze_non_stimate": 14,
       "stato": "aperto",
       "issue": null
     },
@@ -4623,9 +4695,15 @@
           "costo_usd": null,
           "nota": "3a occorrenza, sulla mappa settoriale invece che sui tier mancanti: SPCX e' contemporaneamente in `etf_broad: [SPY, QQQ, IWM, SPCX]` (trading.yaml:135, il gruppo che alimenta MAX_SECTOR_EXPOSURE) e in `tier_c` di cost_model.yaml:44 ('Mid-cap, niche ETF, less liquid', spread 10 bps). Le due classificazioni sono incompatibili e le usano due vincoli diversi. Rilevante oggi perche' SPCX ha prodotto lo score piu' alto della giornata: segnale 9420 +0,7200 conf 0,800 alle 16:16 su 'SpaceX Stock Rockets 32% in August', extraction_method=source_metadata (tag del provider). SPCX e' negoziabile: 209 segnali storici, 8 BUY, 7 SELL. Nessun costo: constraints_fired=[] su 24/24 cicli e il segnale e' stato scartato per SKIP_FALLBACK. Ma quando SPCX passera' il gate con un ensemble valido, il cap di concentrazione lo trattera' come diversificazione.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-01.md §10 [DAY-025]"
+        },
+        {
+          "data": "2026-09-29",
+          "costo_usd": 1.24,
+          "nota": "SPCX senza tier: spread_cost_bps 10,0, cost_usd 1,5296 (trade 1036) vs 0,2912 dei large-cap; eccesso di costo modellato 1,24 USD su net_pnl.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-004"
         }
       ],
-      "costo_cumulato_usd": 3.63,
+      "costo_cumulato_usd": 4.87,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
@@ -4685,10 +4763,16 @@
           "costo_usd": 6.93,
           "nota": "[DAY-007] AMAT (S1) ha d_hard_breached=true in 24 cicli su 24 (14:07:05 -> 19:52:10): entry_price 593,80, d_hard 0,2000, trigger 475,04, osservato fra 461,27 e 474,09 (media 466,09). Nessuna riga in stop_decisions per il 2026-08-28 (l'ultima popolazione di quella tabella e' del 2026-07-14), nessun mobile_event, alerts=[] nel risk report delle 22:30. La posizione e' ancora aperta alla data dell'analisi a -22,87% (-116,39 $ non realizzati). Controfattuale corto: uscita al prezzo medio osservato il 08-28 (466,09) contro il prezzo corrente (458,00), su 0,857076 azioni = 6,93 $ evitati. Importo piccolo perche' AMAT si e' mossa poco da allora; il punto e' la ricorrenza.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-28.md"
+        },
+        {
+          "data": "2026-10-02",
+          "costo_usd": null,
+          "nota": "WDC (S4) -24,39% dall'ingresso, sub-share non protetta, cicli con WARNING #161 senza alert.",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-02.md §8"
         }
       ],
       "costo_cumulato_usd": 6.93,
-      "occorrenze_non_stimate": 2,
+      "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
     },
@@ -6097,10 +6181,16 @@
           "costo_usd": null,
           "nota": "[DAY-016] 7 righe DECAY CRITICAL S1/S2/S4 alle 21:00 solo nel log; nessun mobile_event.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
+        },
+        {
+          "data": "2026-09-29",
+          "costo_usd": null,
+          "nota": "21:00 DECAY CRITICAL S1/S2 (IC -0,016, Sharpe -7,16) solo log.critical, nessun mobile_event.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-012"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 18,
+      "occorrenze_non_stimate": 19,
       "stato": "aperto",
       "issue": null
     },
@@ -6419,10 +6509,16 @@
           "costo_usd": null,
           "nota": "[DAY-005] news_log 11699 (SPCX, Starlink) scorato due volte: 11698 alle 17:29:43 (persistito subito prima del crash host) e 11746 alle 17:52:52 dopo la recovery di news:processing. Causa: riavvio host, non SoftTimeLimit. Gruppo ancora a DB al 28/09 (DELETE bloccata dal trigger append-only, deroga charter 24/09). Nessun ordine.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-005]"
+        },
+        {
+          "data": "2026-09-29",
+          "costo_usd": null,
+          "nota": "Worker shadow: SoftTimeLimit 780s -> TimeLimitExceeded(840) -> SIGKILL ForkPoolWorker-3 alle 22:29 (lotto di 12 item perso) e soft limit 12:28 (3 item); solo percorso shadow. Agganciato qui per meccanismo SoftTimeLimit senza recupero idempotente.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-015"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 3,
+      "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": "#551"
     },
@@ -6701,10 +6797,16 @@
           "costo_usd": null,
           "nota": "[DAY-005] fallback_used=true su 125/250 segnali, solo 9 eventi in finbert_fallback_events.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
+        },
+        {
+          "data": "2026-09-29",
+          "costo_usd": null,
+          "nota": "fallback_used=true su 126/258 (48,8%) segnali ma FinBERT reale 1/258 (finbert_fallback_events).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-006"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 13,
+      "occorrenze_non_stimate": 14,
       "stato": "aperto",
       "issue": null
     },
@@ -6881,10 +6983,16 @@
           "costo_usd": null,
           "nota": "[DAY-004] /api/trades: NVDA 1032 gross/net -6,98 contro +28,28/+27,98 nel DB; COST 1033 senza P&L (DB +5,56/+4,74).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
+        },
+        {
+          "data": "2026-09-29",
+          "costo_usd": null,
+          "nota": "/api/trades: NVDA 6,3063 gross -13,22 (ledger -14,62), NVDA 6,3995 gross -6,17 (ledger -3,60), META net_pnl null (ledger +25,23).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-009"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 10,
+      "occorrenze_non_stimate": 11,
       "stato": "aperto",
       "issue": null
     },
@@ -6956,10 +7064,16 @@
           "costo_usd": 0.0,
           "nota": "[DAY-018] Due occorrenze nella giornata. CRM 9219 (14:46:14): gpt-oss polarity=+0,60/conf=0,70 e glm polarity=0,00/conf=0,80 sulla stessa frase; std(ddof=1)=0,4243 >= soglia live ENSEMBLE_DIVERGENCE_STD=0,40 -> aggregate() restituisce None -> reasoning='FinBERT fallback (ensemble divergence)', score persistito -0,578 con confidence 0,688. Il verdetto e' piu' estremo di entrambi i modelli sostituiti e di segno opposto a gpt-oss. Testo valutato (senza titolo, cfr. F-046): 'Salesforce stock dipped on Friday due to profit-taking following a historic rally driven by Q2 earnings, raised guidance and Claudeforce.' FinBERT ha letto la superficie ('dipped', 'profit-taking'); CRM e' salita da 253,23 a 262,74 durante la seduta e ha chiuso la settimana a +24,31%, quindi il segno era sbagliato. ORCL 9218: gptoss +0,55/0,60 e glm -0,20/0,40, std 0,5303 -> FinBERT +0,106. Costo 0,0 ACCERTATO, non 'non stimato': tracciato il controfattuale riga per riga - il -0,578 ha prodotto solo uno SKIP_PYRAMIDING (CRM era gia' a libro) e fetch_signals_for_cycle ha poi preferito il segnale ensemble 9222 piu' recente, quindi nessun ordine e' cambiato. Con la stessa dinamica su un simbolo non detenuto un -0,578 avrebbe superato il gate d'uscita e, a segno invertito, quello d'ingresso. Il difetto e' che la guida architetturale prescrive di degradare verso indicatori deterministici (medie mobili, RSI) mentre il codice degrada verso un terzo modello di sentiment non vincolato all'inviluppo dei due sostituiti.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-28.md"
+        },
+        {
+          "data": "2026-09-29",
+          "costo_usd": null,
+          "nota": "XLE 17:03 divergenza ensemble -> FinBERT -0,931 conf 0,84, segnale 13232 -0,782 con ensemble_std 0,000; nessun ordine.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-007"
         }
       ],
       "costo_cumulato_usd": 0.0,
-      "occorrenze_non_stimate": 0,
+      "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
     },
@@ -7141,6 +7255,25 @@
           "costo_usd": null,
           "nota": "[DAY-007] 05:35:33 CheckViolation weight_update_log_source_check, riga fallita id 23 source telegram; set_ensemble_weights (telegram_poller.py:424) precede INSERT audit (:432). Nuovo id: nessun finding esistente copre weight_update_log. Costo non stimabile (nessun trade attribuibile).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
+        }
+      ],
+      "costo_cumulato_usd": 0,
+      "occorrenze_non_stimate": 1,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-093",
+      "titolo": "Lo snapshot dell'account broker usa cash e last_equity stantii: per un'intera seduta cash resta al valore del 25/09 e last_equity vale 0, quindi NAV, previous_close_equity, nav_change_today, drawdown e il sizing S4 (2% di NAV) sono calcolati su un equity sottostimato di ~1,5k USD senza alcuna degradazione segnalata",
+      "tipo": "difetto",
+      "confidenza": "misurata",
+      "primo_avvistamento": "2026-09-29",
+      "occorrenze": [
+        {
+          "data": "2026-09-29",
+          "costo_usd": null,
+          "nota": "82/82 snapshot con previous_close_equity=0 e cash 71290,39 (identico al 25/09 20:00); NAV 20:00 108259 vs 109786 reali (previous_close 30/09); target SPCX 2162,98=2% di 108149. Nuovo id: nessun finding esistente copre l'account snapshot stantio (F-050/F-053 riguardano drawdown e storico P&L). Costo non stimabile: il sizing e' ~1,4% off su ordini da ~1,45k.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-001"
         }
       ],
       "costo_cumulato_usd": 0,
