@@ -701,12 +701,18 @@
           "costo_usd": null,
           "nota": "DAY-018: 21:00:00 DECAY CRITICAL [S1] IC 0,035->-0,032, [S2] 0,042->-0,032, [S4] 0,028->-0,032; Sharpe -7,45 identico su S1/S2/S4.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-09-30",
+          "costo_usd": null,
+          "nota": "DAY-007: Sharpe -6,60 e IC -0,017 identici per S1/S2/S4 = metrica pipeline-globale.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-30.md §10 DAY-007"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 29
+      "occorrenze_non_stimate": 30
     },
     {
       "id": "F-005",
@@ -2101,10 +2107,16 @@
           "costo_usd": null,
           "nota": "Segnale 13204 C +0,450 (single gpt-oss, glm 0,00) su articolo 'Coinbase Wins CFTC Approval' (news_log 13205, source_metadata); nessun ordine (SKIP_FALLBACK 53652). Errore di tagging non provabile.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-005"
+        },
+        {
+          "data": "2026-09-30",
+          "costo_usd": null,
+          "nota": "DAY-003: articolo Northrop Grumman taggato BA, FinBERT -0,92 su BA (segnale 13515); bloccato da SKIP_FALLBACK, nessun ordine.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-30.md §10 DAY-003"
         }
       ],
       "costo_cumulato_usd": 937.61,
-      "occorrenze_non_stimate": 33,
+      "occorrenze_non_stimate": 34,
       "stato": "aperto",
       "issue": null
     },
@@ -2517,10 +2529,16 @@
           "costo_usd": null,
           "nota": "DAY-014: portfolio_cycles.orders_count somma 73 su 24 cicli contro 8 ordini di decisione inviati (+5 stop); ciclo 16:52 'orders_before=4 orders_after=4' con 2 ordini inviati.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-09-30",
+          "costo_usd": null,
+          "nota": "DAY-005: 20 cicli con orders_count>0, somma 30, contro 7 ordini broker reali.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-30.md §10 DAY-005"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 30,
+      "occorrenze_non_stimate": 31,
       "stato": "aperto",
       "issue": null
     },
@@ -3067,10 +3085,16 @@
           "costo_usd": null,
           "nota": "17267 righe con token Telegram e 3 con api_key= in worker-inference-2026-09-29.log.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-010"
+        },
+        {
+          "data": "2026-09-30",
+          "costo_usd": null,
+          "nota": "DAY-006: bot token Telegram in chiaro negli URL getUpdates del worker-inference ogni 5 s.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-30.md §10 DAY-006"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 18,
+      "occorrenze_non_stimate": 19,
       "stato": "aperto",
       "issue": null
     },
@@ -3667,10 +3691,16 @@
           "costo_usd": null,
           "nota": "Stop META 2/2,017, SPCX 9/9,754, NVDA 6/6,306 creati 15-30 min dopo l'ingresso; WDC unprotected -18,1% sub_one_share (3 warning).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-014"
+        },
+        {
+          "data": "2026-09-30",
+          "costo_usd": null,
+          "nota": "DAY-010: warning #161 MS (-15,4%) e WDC (-16,5%) non protetti per quantita' sub_one_share.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-30.md §10 DAY-010"
         }
       ],
       "costo_cumulato_usd": 35.9,
-      "occorrenze_non_stimate": 20,
+      "occorrenze_non_stimate": 21,
       "stato": "aperto",
       "issue": null
     },
@@ -3836,10 +3866,16 @@
           "costo_usd": null,
           "nota": "NVDA uscita 14:22 su segnale 13133 +0,019 conf 0,25 e 17:52 su 13260 +0,000 conf 0,15 con posizione aperta su +0,405/+0,354; il drift post-uscita e' negativo (uscite non costose), controfattuale non stimato.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-003"
+        },
+        {
+          "data": "2026-09-30",
+          "costo_usd": null,
+          "nota": "DAY-001: ultimo segnale sovrascrive il precedente (BA +0,580 -> +0,102 conf 0,45; HOOD 0,307 -> 0,294) e determina la SELL.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-30.md §10 DAY-001"
         }
       ],
       "costo_cumulato_usd": 88.22,
-      "occorrenze_non_stimate": 14,
+      "occorrenze_non_stimate": 15,
       "stato": "aperto",
       "issue": null
     },
@@ -5681,10 +5717,16 @@
           "costo_usd": null,
           "nota": "DAY-016: disaccordo fra i due modelli: 5 segni opposti su 101 ensemble, 12 su 68 single gpt-oss a due risposte; nessun gate di varianza. Nessun ordine dipende da un caso di disaccordo.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-09-30",
+          "costo_usd": null,
+          "nota": "DAY-009: glm ineleggibile in 70/127 risposte d'ensemble; log 'masked divergence' (es. SPY std 0,1414 -> 0,0000); 73 segnali single-gpt-oss.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-30.md §10 DAY-009"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 13,
+      "occorrenze_non_stimate": 14,
       "stato": "aperto",
       "issue": null
     },
@@ -5974,10 +6016,16 @@
           "costo_usd": null,
           "nota": "[DAY-002] COST SELL 14:22 (dec. 48626, trade 1033) su FinBERT fallback +0,040; costo -3,19 gia' in F-059 dall'alpha-miss: non ricontato.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
+        },
+        {
+          "data": "2026-09-30",
+          "costo_usd": null,
+          "nota": "DAY-001: 3 uscite below_entry_gate a score positivo (HOOD +0,294, BA +0,102, SPCX +0,265) senza banda; uscite favorevoli sul giorno, nessun costo attribuibile.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-30.md §10 DAY-001"
         }
       ],
       "costo_cumulato_usd": 13.58,
-      "occorrenze_non_stimate": 6,
+      "occorrenze_non_stimate": 7,
       "stato": "aperto",
       "issue": null
     },
@@ -6187,10 +6235,16 @@
           "costo_usd": null,
           "nota": "21:00 DECAY CRITICAL S1/S2 (IC -0,016, Sharpe -7,16) solo log.critical, nessun mobile_event.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-012"
+        },
+        {
+          "data": "2026-09-30",
+          "costo_usd": null,
+          "nota": "DAY-007: 6 DECAY CRITICAL alle 21:00 UTC solo su log, nessun canale.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-30.md §10 DAY-007"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 19,
+      "occorrenze_non_stimate": 20,
       "stato": "aperto",
       "issue": null
     },
@@ -6687,10 +6741,16 @@
           "costo_usd": null,
           "nota": "Entita' HTML (&#39;) ancora nel testo scorato di 2 su 9 righe di ORCL/ARM.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-29.md §8"
+        },
+        {
+          "data": "2026-09-30",
+          "costo_usd": null,
+          "nota": "DAY-008: 142/208 righe news con entita' HTML non decodificate (es. BA 'What&#39;s Going On').",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-30.md §10 DAY-008"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 9,
+      "occorrenze_non_stimate": 10,
       "stato": "aperto",
       "issue": null
     },
@@ -7014,10 +7074,16 @@
           "costo_usd": 0.0,
           "nota": "[DAY-004] Riavvio non pulito dell'host in seduta: journal boot -2 si interrompe senza shutdown, boot -1 alle 17:30:32Z; container fermi 17:29:35-17:30:53, Postgres in recovery (API 'database system is starting up'), DNS assente alle 17:31:09 (ingestion saltata come 'Market closed'), WS news 55x 'connection limit exceeded' fino alle 17:35:14. Nessun alert: solo system:market_clock aperto e chiuso in 0,4 s. Causa diversa da Redis MISCONF, stesso difetto (stack giu' senza alert): agganciato. Costo 0,0 misurato: 24/24 cicli, nessun ordine mancato.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-18.md §10 [DAY-004]"
+        },
+        {
+          "data": "2026-09-30",
+          "costo_usd": null,
+          "nota": "DAY-004: news-stream WS 102 errori 'connection limit exceeded', 103 riavvii, nessun alert; log senza timestamp, buchi non quantificabili.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-30.md §10 DAY-004"
         }
       ],
       "costo_cumulato_usd": 0.0,
-      "occorrenze_non_stimate": 0,
+      "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
     },
