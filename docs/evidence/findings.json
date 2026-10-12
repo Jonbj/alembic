@@ -266,9 +266,15 @@
           "costo_usd": 264.19,
           "nota": "watchlist_zero_news 68/96; SPCX e TSLA mover senza alcuna riga news_log.",
           "fonte": "ALPHA_MISS_REPORT_2026-10-02.md §8"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": 69.66,
+          "nota": "watchlist_zero_news 29/96; BIDU mover NO_NEWS e in ticker_allerta_zero_articoli (>=5 sedute).",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-05.md §8"
         }
       ],
-      "costo_cumulato_usd": 5516.8,
+      "costo_cumulato_usd": 5586.46,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 11
@@ -3872,9 +3878,15 @@
           "costo_usd": null,
           "nota": "DAY-001: ultimo segnale sovrascrive il precedente (BA +0,580 -> +0,102 conf 0,45; HOOD 0,307 -> 0,294) e determina la SELL.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-30.md §10 DAY-001"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": 40.27,
+          "nota": "3/3 ingressi S4 chiusi in seduta: il segnale del BUY e' sostituito entro 13-30 min da uno piu' debole su altro articolo (VALE 0,49->0,2383; SPCX 0,372->0,12 fallback; TSLA 0,3712->0,0046), uscita a scadenza hold minimum 90 min.",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-05.md §8"
         }
       ],
-      "costo_cumulato_usd": 88.22,
+      "costo_cumulato_usd": 128.49,
       "occorrenze_non_stimate": 15,
       "stato": "aperto",
       "issue": null
@@ -4608,9 +4620,15 @@
           "costo_usd": null,
           "nota": "[DAY-011] 8 SKIP_PYRAMIDING su ABBV, XOM, XLE, PANW con segnali +0,30/+0,42; ABBV $764 contro target $2.960.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": 14.68,
+          "nota": "PBR +11,50% (S1 detenuta): segnale S4 +0,4632 (13935) sopra gate bloccato da SKIP_PYRAMIDING alle 14:37; movimento quasi tutto nel gap.",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-05.md §8"
         }
       ],
-      "costo_cumulato_usd": 231.06,
+      "costo_cumulato_usd": 245.74,
       "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
