@@ -3944,9 +3944,15 @@
           "costo_usd": 40.27,
           "nota": "3/3 ingressi S4 chiusi in seduta: il segnale del BUY e' sostituito entro 13-30 min da uno piu' debole su altro articolo (VALE 0,49->0,2383; SPCX 0,372->0,12 fallback; TSLA 0,3712->0,0046), uscita a scadenza hold minimum 90 min.",
           "fonte": "ALPHA_MISS_REPORT_2026-10-05.md §8"
+        },
+        {
+          "data": "2026-10-06",
+          "costo_usd": -6.71,
+          "nota": "AVGO: segnale del BUY 14315 (0,3112) sostituito alle 18:57 da 14348 (0,0063, fan-out ETF/S&P 500); hold minimum skip 19:07, isteresi 19:22, SELL 19:37 hold_minimum_expiry.",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-06.md §8"
         }
       ],
-      "costo_cumulato_usd": 128.49,
+      "costo_cumulato_usd": 121.78,
       "occorrenze_non_stimate": 15,
       "stato": "aperto",
       "issue": null
@@ -4481,9 +4487,15 @@
           "costo_usd": 34.75,
           "nota": "HOOD ingresso 14:07 con quota precedente 0,708 su articoli 12:56-13:45Z; BA 14:22 quota 0,40.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-30.md §8"
+        },
+        {
+          "data": "2026-10-06",
+          "costo_usd": 11.32,
+          "nota": "AVGO unico ingresso su mover: ore 17:52, quota_movimento_precedente_al_segnale 1,47, entry_percentile 0,948, BAD_FILL; segnale 14315 (0,3112) su articolo pubblicato 17:35 dopo il rally.",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-06.md §8"
         }
       ],
-      "costo_cumulato_usd": 435.61,
+      "costo_cumulato_usd": 446.93,
       "occorrenze_non_stimate": 11,
       "stato": "aperto",
       "issue": null
@@ -4889,9 +4901,15 @@
           "costo_usd": null,
           "nota": "WDC (S4) -24,39% dall'ingresso, sub-share non protetta, cicli con WARNING #161 senza alert.",
           "fonte": "ALPHA_MISS_REPORT_2026-10-02.md §8"
+        },
+        {
+          "data": "2026-10-06",
+          "costo_usd": 10.24,
+          "nota": "WDC (S4, 0,3347 azioni) a -25,16% dall'ingresso; WARNING #161 unprotected da -23,9% (14:07) a -25,4% (19:52) ad ogni ciclo, nessun invio alert nei log della seduta; uscita EXIT_WRONG_SIGN score_firmato +0,08.",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-06.md §8"
         }
       ],
-      "costo_cumulato_usd": 6.93,
+      "costo_cumulato_usd": 17.17,
       "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
