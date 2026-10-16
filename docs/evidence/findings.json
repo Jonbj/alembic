@@ -719,12 +719,18 @@
           "costo_usd": null,
           "nota": "DAY-016: decay 22:00:47 (catch-up): S1/S2/S4 stesso IC -0,019 e stesso Sharpe -6,71 contro baseline distinte.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-02.md §10 DAY-016"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": null,
+          "nota": "[DAY-006] S1/S2/S4 con lo stesso Sharpe -3,66 e IC 0,003 contro baseline distinte; daily_return 0,03868 = net_pnl/notional dei trade chiusi (238,23/6.158), non rendimento NAV (+0,16%).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.8 e DAY-006"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 31
+      "occorrenze_non_stimate": 32
     },
     {
       "id": "F-005",
@@ -852,12 +858,18 @@
           "costo_usd": null,
           "nota": "DAY-013: Telegram 400 Bad Request alle 14:37:07 sull'alert #161 WDC unprotected -25,2%.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-02.md §10 DAY-013"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": null,
+          "nota": "[DAY-006] Telegram 400 Bad Request alle 04:00 e 14:07:08.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-006"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 20
+      "occorrenze_non_stimate": 21
     },
     {
       "id": "F-006",
@@ -1136,12 +1148,18 @@
           "costo_usd": null,
           "nota": "DAY-020: ingestion_stats_daily alpaca_benzinga fetched 236, queued 331, duplicates 747.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-02.md §10 DAY-020"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": null,
+          "nota": "[DAY-007] ingestion_stats_daily alpaca_benzinga fetched 925, queued 610, duplicates 6081.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-007"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 37
+      "occorrenze_non_stimate": 38
     },
     {
       "id": "F-008",
@@ -1631,10 +1649,16 @@
           "costo_usd": null,
           "nota": "DAY-009: 20 dei 52 segnali ensemble con 0/2 risposte eligible (32 con 2/2).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-02.md §10 DAY-009"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": null,
+          "nota": "[DAY-001] 58 su 143 segnali ensemble con entrambe le risposte eligible; 94+3 segnali single-model (glm conf media 0,25).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-001"
         }
       ],
       "costo_cumulato_usd": 54.48,
-      "occorrenze_non_stimate": 24,
+      "occorrenze_non_stimate": 25,
       "stato": "aperto",
       "issue": null
     },
@@ -1860,10 +1884,16 @@
           "costo_usd": null,
           "nota": "[DAY-003] Entrambi i SELL del 28/09 (dec. 48626, 48841) con signal_id NULL: 0/2 nel dossier decision_signal_id_coverage.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": null,
+          "nota": "[DAY-007] signal_id NULL su 3 delle 9 decisioni BUY/SELL (le 3 below_entry_gate: 60986, 61431, 61867).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-007"
         }
       ],
       "costo_cumulato_usd": 0.0,
-      "occorrenze_non_stimate": 34,
+      "occorrenze_non_stimate": 35,
       "stato": "aperto",
       "issue": null
     },
@@ -2372,9 +2402,15 @@
           "costo_usd": 6.38,
           "nota": "NVDA SELL 14:22 @229,617 -> BUY 15:52 @230,582 -> SELL 17:52 su +0,000. Costo = (230,5816-229,6169)*6,3063=6,08 + cost_usd ingresso extra 0,29 (trade 1037, decisioni 51209/51835/52732). Tutti e 3 i SELL del giorno con score >=0.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-002"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": -3.3,
+          "nota": "[DAY-002] SPCX SELL 17:07 @167,816 (below_entry_gate, segnale 16:23 a +0,275) -> BUY 18:37 @167,285 (trade 1054). Costo = cost_usd ingresso extra 1,63 - (167,816-167,285)*9,281=4,93 -> -3,30 (il ri-ingresso a prezzo migliore ha compensato). Include 3 SELL su 4 con sentiment positivo.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-002"
         }
       ],
-      "costo_cumulato_usd": 58.11,
+      "costo_cumulato_usd": 54.81,
       "occorrenze_non_stimate": 8,
       "stato": "aperto",
       "issue": null
@@ -2577,10 +2613,16 @@
           "costo_usd": null,
           "nota": "DAY-012: orders_count 1 su 4 cicli (NVDA x3, QQQ) con submitted 0.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-02.md §10 DAY-012"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": null,
+          "nota": "[DAY-007] orders_count 1-5 per ciclo contro <=1 ordine inviato; LLY BUY in final_orders di 14 cicli mai inviato (P0-05).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-007"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 32,
+      "occorrenze_non_stimate": 33,
       "stato": "aperto",
       "issue": null
     },
@@ -3018,10 +3060,16 @@
           "costo_usd": null,
           "nota": "DAY-007: detect_regime 07:00:55 e 13:30:36: LLM-2 qwen3.5:cloud 410 Gone -> sideways x0,7, disagreement=False, task succeeded.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-02.md §10 DAY-007"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": null,
+          "nota": "[DAY-007] 07:00:57 LLM-2 regime detection 410 Gone, task succeeded.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-007"
         }
       ],
       "costo_cumulato_usd": 52.35,
-      "occorrenze_non_stimate": 13,
+      "occorrenze_non_stimate": 14,
       "stato": "aperto",
       "issue": null
     },
@@ -3151,10 +3199,16 @@
           "costo_usd": null,
           "nota": "DAY-014: bot token in chiaro in 12.211 righe del log inference e 3 del log worker.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-02.md §10 DAY-014"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": null,
+          "nota": "[DAY-006] token bot Telegram in chiaro in ~17.270 righe getUpdates del log worker-inference.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-006"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 20,
+      "occorrenze_non_stimate": 21,
       "stato": "aperto",
       "issue": null
     },
@@ -3612,6 +3666,12 @@
           "costo_usd": null,
           "nota": "DAY-018: primo portfolio-cycle 14:07:00, portfolio_cycle_late 13:30:01 -> 14:08:00, open_gap 37 min.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-02.md §10 DAY-018"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": 0.0,
+          "nota": "[DAY-004] primo portfolio-cycle 14:07:00, apertura 13:30 (EDT): gap 37 min. Nessun segnale con |score|>=0,30 generato fra 13:30 e 14:07 (0 righe) -> costo misurato 0.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-004"
         }
       ],
       "costo_cumulato_usd": 96.72,
@@ -3950,10 +4010,16 @@
           "costo_usd": -6.71,
           "nota": "AVGO: segnale del BUY 14315 (0,3112) sostituito alle 18:57 da 14348 (0,0063, fan-out ETF/S&P 500); hold minimum skip 19:07, isteresi 19:22, SELL 19:37 hold_minimum_expiry.",
           "fonte": "ALPHA_MISS_REPORT_2026-10-06.md §8"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": null,
+          "nota": "[DAY-002] VALE (dec 60986, +0,238), SPCX (61431, +0,275), TSLA (61867, +0,005): il segnale forte (0,490/0,372/0,371) e' sostituito da uno piu' recente e debole e la posizione esce a 105 min. Costo SPCX contato in F-013; VALE (-3,10 netto) e TSLA (+6,80 netto) senza controfattuale di holding disponibile.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-002"
         }
       ],
       "costo_cumulato_usd": 121.78,
-      "occorrenze_non_stimate": 15,
+      "occorrenze_non_stimate": 16,
       "stato": "aperto",
       "issue": null
     },
@@ -4704,9 +4770,15 @@
           "costo_usd": -32.15,
           "nota": "DAY-006: NVDA 13845 +0,435 (14:07-14:37) e QQQ 13865 +0,318 (14:52) SKIP_PYRAMIDING (S1 a libro). Congetturale 2.200 $: NVDA 236,64->234,00 = -24,54; QQQ 752,20->749,60 = -7,60; il blocco ha evitato 32,15 $.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-02.md §10 DAY-006"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": -3.3,
+          "nota": "[DAY-003] 5 SKIP_PYRAMIDING sopra gate: LLY +0,382, PBR +0,463, TSM +0,329, XLK +0,291, ABBV +0,331. Congetturale 2.200 $ x forward_return 1d: +26,18 -32,78 -16,28 +11,00 +8,58 = -3,30 (blocco ha evitato perdita marginale).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-003"
         }
       ],
-      "costo_cumulato_usd": 213.59,
+      "costo_cumulato_usd": 210.29,
       "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
@@ -5574,10 +5646,16 @@
           "costo_usd": null,
           "nota": "[DAY-014] Degrado diffuso, non outage: entrambi i modelli rispondono dalle 13:31:19 alle 19:52:08 senza buchi (0 ore di downtime), ma 64 timeout a 90s (gpt-oss 33, glm 31) e 8 rate limit su 428 tentativi -> tasso di successo 83,2%. 80/214 segnali in fallback (37,4%), di cui 29 FinBERT puri (13,6%) e 51 single-model cloud. 3 cicli su 50 con n_ensemble=0. DA INCROCIARE con F-072: e' questo degrado di latenza a portare il ciclo sentiment delle 15:08-15:20 contro il soft time limit di 780s. Il lato ordini ha tenuto: 0/7 BUY da segnale fallback, guard #108 attivo 15 volte su 15.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-08.md §16, [DAY-014]"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": null,
+          "nota": "[DAY-005] Degrado diffuso senza outage continuo: ~20 timeout 90 s, 3 FinBERT 'Ollama timeout'; 0 h di downtime misurate.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-005"
         }
       ],
       "costo_cumulato_usd": 136.8,
-      "occorrenze_non_stimate": 3,
+      "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
     },
@@ -5831,10 +5909,16 @@
           "costo_usd": null,
           "nota": "DAY-008: 20 righe 'F-054 masked divergence' in RTH (71 nel giorno), max NVDA 13:53 std 0,2828 -> 0,0000 sull'unico eleggibile.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-02.md §10 DAY-008"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": null,
+          "nota": "[DAY-001] 107 righe 'F-054 masked divergence' nel log worker-inference del 10-05.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-001"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 15,
+      "occorrenze_non_stimate": 16,
       "stato": "aperto",
       "issue": null
     },
@@ -6361,10 +6445,16 @@
           "costo_usd": null,
           "nota": "DAY-017: 7 righe DECAY CRITICAL alle 22:00:47 solo nel log, nessuna riga in mobile_events.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-02.md §10 DAY-017"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": null,
+          "nota": "[DAY-006] 6 righe DECAY CRITICAL (S1/S2/S4) alle 21:00:00 solo nel log.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-006"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 21,
+      "occorrenze_non_stimate": 22,
       "stato": "aperto",
       "issue": null
     },
@@ -7001,10 +7091,16 @@
           "costo_usd": null,
           "nota": "DAY-010: somma 'finbert_fallbacks' nei task RTH = 26 contro 1 riga finbert_fallback_events (MU 13838).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-02.md §10 DAY-010"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": null,
+          "nota": "[DAY-001] somma 'finbert_fallbacks' nei 79 task = 100 contro 3 righe finbert_fallback_events (single-model 97 contati come FinBERT).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-001"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 15,
+      "occorrenze_non_stimate": 16,
       "stato": "aperto",
       "issue": null
     },
@@ -7249,10 +7345,16 @@
           "costo_usd": null,
           "nota": "[DAY-008] 26 timeout Ollama 90s (gpt-oss 14, glm-5.3 12); nessuna traccia di trasporto/latenza.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-28.md §10"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": null,
+          "nota": "[DAY-005] ~20 timeout Ollama 90 s (glm 12, gpt-oss 8) + task shadow ucciso da hard limit 840 s alle 00:29; nessuna latenza/trasporto persistiti.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-005"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 3,
+      "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
     },
@@ -7503,10 +7605,16 @@
           "costo_usd": null,
           "nota": "DAY-001: NIC enp6s0 giu' 14:59:46, reboot 15:48:07, boot 22:00:34: 20/24 cicli persi, nessuna news/segnale dopo 14:59:37; broker_stale+market_clock critical 15:00 -> recovered 22:00:53 mai notificati. Id nuovo: F-085 e' il guasto disco/Redis, F-049 l'outage Ollama, F-074 il clock Alpaca lato provider; qui la causa e' la perdita di rete dell'host e il difetto e' l'assenza di un canale d'allerta fuori host. Costo non stimabile (nessun segnale prodotto); contamina F-001/F-009 del 02/10 (ALPHA_MISS).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-02.md §10 DAY-001"
+        },
+        {
+          "data": "2026-10-05",
+          "costo_usd": null,
+          "nota": "[DAY-005] Blip DNS transitorio: clock Alpaca 18:36:46 (ciclo 18:37 regolare) e ollama.com 19:00:00 (entrambi i modelli -> FinBERT); nessun alert.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-005"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 1,
+      "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
     },
