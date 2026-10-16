@@ -86,6 +86,54 @@ def test_il_runner_elimina_solo_i_log_del_servizio_oltre_sessanta_giorni(
     assert api_scaduto.exists()
 
 
+def _esegui_runner(tmp_path: Path, script: str, max_bytes: int):
+    return subprocess.run(
+        [
+            sys.executable,
+            str(RUNNER),
+            "--service",
+            "worker-news-stream",
+            "--log-dir",
+            str(tmp_path),
+            "--max-bytes-per-day",
+            str(max_bytes),
+            "--",
+            sys.executable,
+            "-c",
+            script,
+        ],
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_il_runner_smette_di_scrivere_oltre_il_tetto_giornaliero(tmp_path: Path):
+    """Un loop di traceback (DNS giu', 2026-10-02 e 2026-10-12/13) ha riempito
+    il disco: il file giornaliero non deve crescere oltre il tetto, mentre
+    stdout continua a ricevere tutto."""
+    script = "import sys\nfor _ in range(2000): print('x' * 99, flush=True)"
+    result = _esegui_runner(tmp_path, script, max_bytes=10_000)
+
+    assert result.returncode == 0
+    assert len(result.stdout) == 200_000
+    giorno = datetime.now(UTC).date().isoformat()
+    contenuto = (tmp_path / f"worker-news-stream-{giorno}.log").read_bytes()
+    assert contenuto.startswith(b"x" * 99 + b"\n")
+    assert b"tetto di 10000 byte/giorno raggiunto" in contenuto
+    assert len(contenuto) < 10_000 + 200
+
+
+def test_il_tetto_conta_quanto_gia_scritto_oggi_prima_del_riavvio(tmp_path: Path):
+    giorno = datetime.now(UTC).date().isoformat()
+    file_oggi = tmp_path / f"worker-news-stream-{giorno}.log"
+    file_oggi.write_bytes(b"y" * 10_000)
+
+    result = _esegui_runner(tmp_path, "print('dopo-riavvio', flush=True)", 10_000)
+
+    assert result.stdout == b"dopo-riavvio\n"
+    assert file_oggi.read_bytes() == b"y" * 10_000
+
+
 def test_il_runner_non_trattiene_l_output_finche_il_servizio_termina(tmp_path: Path):
     process = subprocess.Popen(
         [

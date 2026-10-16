@@ -7,6 +7,63 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
+# ── Reconnect backoff (disk filled by a tight reconnect loop, 2026-10) ────────
+
+
+class TestReconnectBackoff:
+    def test_ritardo_esponenziale_con_tetto_e_reset_dopo_connessione_stabile(self):
+        from src.connectors.alpaca_news_stream import (
+            RECONNECT_MAX_DELAY_S,
+            RECONNECT_STABLE_S,
+            ReconnectBackoff,
+        )
+
+        now = [0.0]
+        backoff = ReconnectBackoff(clock=lambda: now[0])
+
+        delays = []
+        for _ in range(9):
+            delays.append(backoff.next_delay())
+            backoff.mark_start()
+        assert delays == [0.0, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 60.0, 60.0]
+        assert max(delays) == RECONNECT_MAX_DELAY_S
+
+        now[0] += RECONNECT_STABLE_S
+        assert backoff.next_delay() == 0.0
+        backoff.mark_start()
+        assert backoff.next_delay() == 1.0
+
+    def test_lo_stream_reale_non_ritenta_in_loop_stretto_col_dns_giu(self):
+        """Drives alpaca-py's own _run_forever with name resolution failing:
+        without the backoff it retries with sleep(0) and only a traceback."""
+        import socket
+
+        from src.connectors.alpaca_news_stream import AlpacaNewsStreamConnector
+
+        stream = AlpacaNewsStreamConnector("k", "s", ["AAPL"], AsyncMock())._build_stream()
+        stream.subscribe_news(AsyncMock(), "AAPL")
+        stream._connect = AsyncMock(
+            side_effect=socket.gaierror(-3, "Temporary failure in name resolution")
+        )
+
+        delays = []
+        real_sleep = asyncio.sleep
+
+        async def fake_sleep(delay, *args, **kwargs):
+            if delay:
+                delays.append(delay)
+            # also bounds the loop when there is no backoff at all
+            if len(delays) >= 4 or stream._connect.await_count >= 50:
+                stream._should_run = False
+            await real_sleep(0)
+
+        with patch("asyncio.sleep", fake_sleep):
+            asyncio.run(stream._run_forever())
+
+        assert stream._connect.await_count == 5
+        assert delays == [1.0, 2.0, 4.0, 8.0]
+
+
 # ── AlpacaNewsStreamConnector ─────────────────────────────────────────────────
 
 

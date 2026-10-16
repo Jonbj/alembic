@@ -15,6 +15,11 @@ from typing import BinaryIO
 
 DEFAULT_LOG_DIR = Path("/var/log/alembic")
 DEFAULT_RETENTION_DAYS = 60
+# Tetto per servizio e per giorno: un loop di errori (DNS giu' il 2026-10-02 e
+# il 2026-10-12/13, ~3M traceback/giorno da worker-news-stream) ha riempito il
+# disco. Oltre il tetto il file riceve una riga di avviso e poi nient'altro fino
+# al giorno dopo; stdout (driver json-file, gia' limitato) continua a ricevere.
+DEFAULT_MAX_BYTES_PER_DAY = 1024 * 1024 * 1024
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -24,6 +29,9 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--retention-days", type=int, default=DEFAULT_RETENTION_DAYS
     )
+    parser.add_argument(
+        "--max-bytes-per-day", type=int, default=DEFAULT_MAX_BYTES_PER_DAY
+    )
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     if args.command[:1] == ["--"]:
@@ -32,6 +40,8 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("manca il comando da eseguire dopo --")
     if args.retention_days < 1:
         parser.error("--retention-days deve essere positivo")
+    if args.max_bytes_per_day < 1:
+        parser.error("--max-bytes-per-day deve essere positivo")
     if not args.service.replace("-", "").replace("_", "").isalnum():
         parser.error("--service contiene caratteri non validi")
     return args
@@ -57,13 +67,45 @@ def _open_daily_log(log_dir: Path, service: str, day: date) -> BinaryIO:
     )
 
 
+class _CappedDailyLog:
+    """File giornaliero che smette di crescere oltre `max_bytes`."""
+
+    def __init__(self, log_dir: Path, service: str, day: date, max_bytes: int):
+        self._file = _open_daily_log(log_dir, service, day)
+        # dopo un riavvio nello stesso giorno il tetto conta anche quanto gia' scritto
+        self._written = self._file.tell()
+        self._max_bytes = max_bytes
+        self._truncated = self._written >= max_bytes
+
+    def write(self, chunk: bytes) -> None:
+        if self._truncated:
+            return
+        room = self._max_bytes - self._written
+        if len(chunk) <= room:
+            self._file.write(chunk)
+            self._written += len(chunk)
+            return
+        self._file.write(chunk[:room])
+        self._file.write(
+            f"\n[run_with_durable_logs] tetto di {self._max_bytes} byte/giorno "
+            "raggiunto: output successivo di oggi solo su stdout (docker logs)\n"
+            .encode()
+        )
+        self._truncated = True
+
+    def close(self) -> None:
+        self._file.close()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
     args.log_dir.mkdir(parents=True, exist_ok=True)
 
     today = datetime.now(UTC).date()
     _remove_expired_logs(args.log_dir, args.service, args.retention_days, today)
-    durable_log = _open_daily_log(args.log_dir, args.service, today)
+    durable_log = _CappedDailyLog(
+        args.log_dir, args.service, today, args.max_bytes_per_day
+    )
 
     child = subprocess.Popen(
         args.command,
@@ -91,7 +133,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 _remove_expired_logs(
                     args.log_dir, args.service, args.retention_days, today
                 )
-                durable_log = _open_daily_log(args.log_dir, args.service, today)
+                durable_log = _CappedDailyLog(
+        args.log_dir, args.service, today, args.max_bytes_per_day
+    )
             durable_log.write(chunk)
             sys.stdout.buffer.write(chunk)
             sys.stdout.buffer.flush()
