@@ -272,9 +272,15 @@
           "costo_usd": 69.66,
           "nota": "watchlist_zero_news 29/96; BIDU mover NO_NEWS e in ticker_allerta_zero_articoli (>=5 sedute).",
           "fonte": "ALPHA_MISS_REPORT_2026-10-05.md §8"
+        },
+        {
+          "data": "2026-10-07",
+          "costo_usd": 172.38,
+          "nota": "watchlist_zero_news 32/96; DB -4,50% e VALE -3,34% mover NO_NEWS, 0 righe e fonti_osservate vuoto; 5 ticker in allerta >=5 sedute (ASML, MMM, RIO, ROKU, TXN).",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-07.md §8"
         }
       ],
-      "costo_cumulato_usd": 5586.46,
+      "costo_cumulato_usd": 5758.84,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 11
@@ -1890,10 +1896,16 @@
           "costo_usd": null,
           "nota": "[DAY-007] signal_id NULL su 3 delle 9 decisioni BUY/SELL (le 3 below_entry_gate: 60986, 61431, 61867).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-007"
+        },
+        {
+          "data": "2026-10-07",
+          "costo_usd": null,
+          "nota": "signal_id presente su 1/3 SELL (regressions: SELL); BUY 2/2, SKIP_THRESHOLD 706/706.",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-07.md §8"
         }
       ],
       "costo_cumulato_usd": 0.0,
-      "occorrenze_non_stimate": 35,
+      "occorrenze_non_stimate": 36,
       "stato": "aperto",
       "issue": null
     },
