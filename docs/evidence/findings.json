@@ -278,12 +278,18 @@
           "costo_usd": 172.38,
           "nota": "watchlist_zero_news 32/96; DB -4,50% e VALE -3,34% mover NO_NEWS, 0 righe e fonti_osservate vuoto; 5 ticker in allerta >=5 sedute (ASML, MMM, RIO, ROKU, TXN).",
           "fonte": "ALPHA_MISS_REPORT_2026-10-07.md §8"
+        },
+        {
+          "data": "2026-10-06",
+          "costo_usd": null,
+          "nota": "effective_timely_coverage 46/96 = 47.9%",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-06.md DAY-007"
         }
       ],
       "costo_cumulato_usd": 5758.84,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 11
+      "occorrenze_non_stimate": 12
     },
     {
       "id": "F-002",
@@ -1160,12 +1166,18 @@
           "costo_usd": null,
           "nota": "[DAY-007] ingestion_stats_daily alpaca_benzinga fetched 925, queued 610, duplicates 6081.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-007"
+        },
+        {
+          "data": "2026-10-06",
+          "costo_usd": null,
+          "nota": "alpaca_benzinga duplicates 5615 > fetched 943",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-06.md DAY-007"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 38
+      "occorrenze_non_stimate": 39
     },
     {
       "id": "F-008",
@@ -1281,10 +1293,16 @@
           "costo_usd": -0.74,
           "nota": "[DAY-007] BABA (trade 1024, aperta su +0,348) chiusa 14:22 @110,86 (below_entry_gate) su segnale -0,007 delle 13:47 da un roundup pre-market multi-ticker che cita BABA -3,4%. Meccanismo di F-008, esito favorevole: tenendo fino al close 110,80 si perdevano altri 12,3415 x 0,06 = 0,74 -> costo -0,74 (attribuito). Il segnale BABA successivo (14:29, GDELT 'Alibaba Falls 4%...') e' -0,42.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-23.md §10"
+        },
+        {
+          "data": "2026-10-06",
+          "costo_usd": null,
+          "nota": "AVGO chiusa 19:37 da segnale generico di settore -0.025 conf 0.25 (sentiment_signals 14366); uscita comunque favorevole (drift -6.71 $)",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-06.md DAY-004"
         }
       ],
       "costo_cumulato_usd": 84.18,
-      "occorrenze_non_stimate": 4,
+      "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
     },
@@ -2191,10 +2209,16 @@
           "costo_usd": null,
           "nota": "DAY-011: 51 URL -> 78 righe; 40 righe (51%) da URL multi-ticker, massimo 7.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-02.md §10 DAY-011"
+        },
+        {
+          "data": "2026-10-06",
+          "costo_usd": null,
+          "nota": "262 righe / 134 articoli (fan-out 1.96), 163 TAG_UNCONFIRMED (62%)",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-06.md DAY-007"
         }
       ],
       "costo_cumulato_usd": 937.61,
-      "occorrenze_non_stimate": 35,
+      "occorrenze_non_stimate": 36,
       "stato": "aperto",
       "issue": null
     },
@@ -2420,10 +2444,16 @@
           "costo_usd": -3.3,
           "nota": "[DAY-002] SPCX SELL 17:07 @167,816 (below_entry_gate, segnale 16:23 a +0,275) -> BUY 18:37 @167,285 (trade 1054). Costo = cost_usd ingresso extra 1,63 - (167,816-167,285)*9,281=4,93 -> -3,30 (il ri-ingresso a prezzo migliore ha compensato). Include 3 SELL su 4 con sentiment positivo.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-002"
+        },
+        {
+          "data": "2026-10-06",
+          "costo_usd": null,
+          "nota": "SPCX: SELL 16:07 (segnale conf 0.15 score 0), BUY 18:37; uscita favorevole (drift -17.31 $), costo non attribuibile",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-06.md DAY-004"
         }
       ],
       "costo_cumulato_usd": 54.81,
-      "occorrenze_non_stimate": 8,
+      "occorrenze_non_stimate": 9,
       "stato": "aperto",
       "issue": null
     },
@@ -3217,10 +3247,16 @@
           "costo_usd": null,
           "nota": "[DAY-006] token bot Telegram in chiaro in ~17.270 righe getUpdates del log worker-inference.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-006"
+        },
+        {
+          "data": "2026-10-06",
+          "costo_usd": null,
+          "nota": "bot token Telegram in chiaro in 17.266 righe httpx del worker-inference",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-06.md DAY-008"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 21,
+      "occorrenze_non_stimate": 22,
       "stato": "aperto",
       "issue": null
     },
@@ -4028,10 +4064,16 @@
           "costo_usd": null,
           "nota": "[DAY-002] VALE (dec 60986, +0,238), SPCX (61431, +0,275), TSLA (61867, +0,005): il segnale forte (0,490/0,372/0,371) e' sostituito da uno piu' recente e debole e la posizione esce a 105 min. Costo SPCX contato in F-013; VALE (-3,10 netto) e TSLA (+6,80 netto) senza controfattuale di holding disponibile.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-002"
+        },
+        {
+          "data": "2026-10-06",
+          "costo_usd": null,
+          "nota": "SPCX segnale 15:34 (0.000, conf 0.15) sovrascrive 14144/13973 (0.405/0.372) e chiude la posizione",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-06.md DAY-004"
         }
       ],
       "costo_cumulato_usd": 121.78,
-      "occorrenze_non_stimate": 16,
+      "occorrenze_non_stimate": 17,
       "stato": "aperto",
       "issue": null
     },
@@ -4571,9 +4613,15 @@
           "costo_usd": 11.32,
           "nota": "AVGO unico ingresso su mover: ore 17:52, quota_movimento_precedente_al_segnale 1,47, entry_percentile 0,948, BAD_FILL; segnale 14315 (0,3112) su articolo pubblicato 17:35 dopo il rally.",
           "fonte": "ALPHA_MISS_REPORT_2026-10-06.md §8"
+        },
+        {
+          "data": "2026-10-06",
+          "costo_usd": -11.32,
+          "nota": "AVGO trade 1055 entrato con quota_movimento_precedente_al_segnale 1.47, net_pnl -11.32 $; NOW 3.47 e SPCX 2.41 (mtm_eod +13.93 / +1.10)",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-06.md DAY-005"
         }
       ],
-      "costo_cumulato_usd": 446.93,
+      "costo_cumulato_usd": 435.61,
       "occorrenze_non_stimate": 11,
       "stato": "aperto",
       "issue": null
@@ -5664,10 +5712,16 @@
           "costo_usd": null,
           "nota": "[DAY-005] Degrado diffuso senza outage continuo: ~20 timeout 90 s, 3 FinBERT 'Ollama timeout'; 0 h di downtime misurate.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-005"
+        },
+        {
+          "data": "2026-10-06",
+          "costo_usd": null,
+          "nota": "429 quota exhausted su entrambi i modelli 15:42-16:55 UTC (~73 min), 48 segnali FinBERT; nessun alert recapitato",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-06.md DAY-002"
         }
       ],
       "costo_cumulato_usd": 136.8,
-      "occorrenze_non_stimate": 4,
+      "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
     },
@@ -5995,10 +6049,16 @@
           "costo_usd": null,
           "nota": "DAY-006: SPCX venduta 18:07 (decisione 58659) sul segnale ensemble 13745 +0,009 delle 17:38 (fan-out 'Whale Alerts') mentre il fallback single 13750 +0,420 delle 17:44 era piu' recente. Costo gia' in F-013 (DAY-005): null.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-01.md §10"
+        },
+        {
+          "data": "2026-10-06",
+          "costo_usd": null,
+          "nota": "BA chiusa 16:52 (decisione 63808): il motivo fallback_filtered cita come fallback il segnale ensemble 14068; il fallback e' 14271 (FinBERT +0.061). Drift post-uscita -7.90 $: uscita favorevole",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-06.md DAY-001"
         }
       ],
       "costo_cumulato_usd": 56.05,
-      "occorrenze_non_stimate": 2,
+      "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
     },
@@ -6463,10 +6523,16 @@
           "costo_usd": null,
           "nota": "[DAY-006] 6 righe DECAY CRITICAL (S1/S2/S4) alle 21:00:00 solo nel log.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-006"
+        },
+        {
+          "data": "2026-10-06",
+          "costo_usd": null,
+          "nota": "6 DECAY CRITICAL (S1/S2/S4) alle 21:00:00 solo log",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-06.md DAY-008"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 22,
+      "occorrenze_non_stimate": 23,
       "stato": "aperto",
       "issue": null
     },
@@ -7109,10 +7175,16 @@
           "costo_usd": null,
           "nota": "[DAY-001] somma 'finbert_fallbacks' nei 79 task = 100 contro 3 righe finbert_fallback_events (single-model 97 contati come FinBERT).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-001"
+        },
+        {
+          "data": "2026-10-06",
+          "costo_usd": null,
+          "nota": "fallback_used=true su 151/262 segnali (48 FinBERT, 7 single-glm, 96 single-gpt-oss): i single-model contati come fallback",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-06.md DAY-003"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 16,
+      "occorrenze_non_stimate": 17,
       "stato": "aperto",
       "issue": null
     },
@@ -7363,10 +7435,16 @@
           "costo_usd": null,
           "nota": "[DAY-005] ~20 timeout Ollama 90 s (glm 12, gpt-oss 8) + task shadow ucciso da hard limit 840 s alle 00:29; nessuna latenza/trasporto persistiti.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-005"
+        },
+        {
+          "data": "2026-10-06",
+          "costo_usd": null,
+          "nota": "finbert_fallback_events.reason='Ollama timeout' su 48/48 righe ma la causa nei log e' 429 quota exhausted; latenza per modello non ricostruibile",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-06.md DAY-002"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 4,
+      "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
     },
@@ -7388,10 +7466,16 @@
           "costo_usd": null,
           "nota": "XLE 17:03 divergenza ensemble -> FinBERT -0,931 conf 0,84, segnale 13232 -0,782 con ensemble_std 0,000; nessun ordine.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-29.md DAY-007"
+        },
+        {
+          "data": "2026-10-06",
+          "costo_usd": null,
+          "nota": "96 segnali single-gpt-oss e 7 single-glm al posto dell'ensemble; 23 segnali |score|>=0.30 provengono da fallback (FinBERT SPCX -0.831 conf 0.88)",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-06.md DAY-003"
         }
       ],
       "costo_cumulato_usd": 0.0,
-      "occorrenze_non_stimate": 1,
+      "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
     },
@@ -7623,10 +7707,16 @@
           "costo_usd": null,
           "nota": "[DAY-005] Blip DNS transitorio: clock Alpaca 18:36:46 (ciclo 18:37 regolare) e ollama.com 19:00:00 (entrambi i modelli -> FinBERT); nessun alert.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-005"
+        },
+        {
+          "data": "2026-10-06",
+          "costo_usd": null,
+          "nota": "Network is unreachable 15:43-15:53 (Telegram), barre/clock Alpaca irraggiungibili 15:42/15:51; nessun alert",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-06.md DAY-006"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 2,
+      "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
     },
