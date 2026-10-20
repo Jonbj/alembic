@@ -284,9 +284,15 @@
           "costo_usd": null,
           "nota": "effective_timely_coverage 46/96 = 47.9%",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-06.md DAY-007"
+        },
+        {
+          "data": "2026-10-08",
+          "costo_usd": 74.67,
+          "nota": "watchlist_zero_news 40/96; HD +3,39% mover NO_NEWS ENTRY_OPPORTUNITY, 0 righe e fonti_osservate vuoto; telecom 0/5, industrials 0/4, materials 0/2.",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-08.md §8"
         }
       ],
-      "costo_cumulato_usd": 5758.84,
+      "costo_cumulato_usd": 5833.51,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 12
@@ -5039,9 +5045,15 @@
           "costo_usd": 10.24,
           "nota": "WDC (S4, 0,3347 azioni) a -25,16% dall'ingresso; WARNING #161 unprotected da -23,9% (14:07) a -25,4% (19:52) ad ogni ciclo, nessun invio alert nei log della seduta; uscita EXIT_WRONG_SIGN score_firmato +0,08.",
           "fonte": "ALPHA_MISS_REPORT_2026-10-06.md §8"
+        },
+        {
+          "data": "2026-10-08",
+          "costo_usd": 4.05,
+          "nota": "WDC (S4, 0,3347 azioni) a -28,39% dall'ingresso, cieca lato uscita da 2 sedute; held_news_loss_alert 22:50 UTC ha alertato NOK e WDC dopo il close.",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-08.md §8"
         }
       ],
-      "costo_cumulato_usd": 17.17,
+      "costo_cumulato_usd": 21.22,
       "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
@@ -6329,9 +6341,15 @@
           "costo_usd": null,
           "nota": "NON_CLASSIFICATO su TSLA oggi (score qualificante 0,468, single-model fallback, sopra gate), stesso bucket ambiguo di NFLX/PLTR (08-13) e PLTR (09-02). Novita' rispetto alle occorrenze precedenti: il campo funnel_v2.righe[].pipeline del dossier - schema piu' recente della serie legacy candidati_miss.causa - etichetta correttamente lo stesso caso FALLBACK_REJECT, con evidence.score_firmato=0,468 esplicito. Il difetto di misura persiste sul campo legacy, che e' quello che alimenta cause_del_giorno e quindi il criterio di falsificazione della domanda 1 della carta (NO_NEWS >=60% dei giorni); ma esiste gia', nello stesso dossier generato dallo stesso script, un campo che disambigua correttamente lo stesso evento. Non e' una chiusura del finding (il campo legacy non e' stato tolto, e cause_del_giorno lo usa ancora), solo una nota che la correzione esiste gia' altrove nello stesso output. Costo null.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-03.md §1, §3, §7, §Segnalazioni"
+        },
+        {
+          "data": "2026-10-08",
+          "costo_usd": 0.0,
+          "nota": "ORCL con segnale fallback -0,720 sopra gate 0,30 (FANOUT, TAG_UNCONFIRMED) esce NON_CLASSIFICATO nella serie legacy; funnel_v2 lo marca NON_ACTIONABLE senza stadio pipeline.",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-08.md §8"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
