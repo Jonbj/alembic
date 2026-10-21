@@ -518,6 +518,46 @@ def _medie_giornaliere(osservazioni: list[tuple[str, float]]) -> dict[str, float
     return {g: float(np.mean(v)) for g, v in per_giorno.items()}
 
 
+# Soglia oltre la quale il campione si dichiara degradato. Non e' una taratura
+# di strategia: e' il punto in cui la quota di mancanti e' tale che il
+# lettore deve sapere che gli articoli esclusi sono numerosi quanto quelli
+# misurati. Dichiarato qui e non di nascosto, perche' una soglia silenziosa
+# e' una soglia che nessuno puo' contestare.
+SOGLA_COPIURA_DEGRADATA = 0.20
+
+
+def quota_copertura_prezzi(n_temporale: int, n_calcolati: int) -> dict:
+    """Quota di articoli senza rapporto calcolabile, e se il campione e' pieno.
+
+    Non distingue "nessun titolo scambiato in quei 5 minuti" da "simbolo che
+    Alpaca non serve": entrambi danno ratio None, e distinguerli richiederebbe
+    il calendario delle sedute per ogni articolo. Quel che questa funzione
+    dichiara e' l'effetto: **quanta parte del campione non e' stata misurata**.
+
+    E' il punto cieco dichiarato nel rilievo della review locale, che chiedeva
+    un abort quando il fetch fallisce. Un abort qui non e' possibile senza
+    confondere le due cause, e la prereg §1.1 lo copre gia' altrove: il fetch
+    che *fallisce* (eccezione, embargo) abortisce in `CaricatoreBarreAlpaca`;
+    il fetch che *riusisce su una serie vuota* e' un buco di copertura e va
+    pubblicato. La riga di copertura e' il posto dove si vede.
+    """
+    mancanti = n_temporale - n_calcolati
+    quota = (mancanti / n_temporale) if n_temporale else 1.0
+    return {
+        "n_temporale": n_temporale,
+        "n_calcolati": n_calcolati,
+        "n_mancanti": mancanti,
+        "quota_mancanti": round(quota, 6),
+        "campione_degradato": quota > SOGLA_COPIURA_DEGRADATA,
+        "nota": (
+            "Quota di articoli senza rapporto calcolabile. Non distingue "
+            "'nessun titolo scambiato in quei 5 minuti' da 'simbolo non "
+            "servito da Alpaca': un fetch che fallisce davvero abortisce prima "
+            "(CaricatoreBarreAlpaca)."
+        ),
+    }
+
+
 def raggruppa_per_gruppo(
     osservazioni: list[tuple[str, str | None, str, float]]
 ) -> dict[str, dict]:
@@ -980,6 +1020,7 @@ def _esegui_anno(
         "conteggi_pipeline": dict(counts),
         "n_rapporti_calcolati": len(osservazioni),
         "n_rapporti_mancanti": counts["temporale"] - len(osservazioni),
+        "copertura_prezzi": quota_copertura_prezzi(counts["temporale"], len(osservazioni)),
         "riferimento_riportato": {
             "log": null_log_rapporto(MINUTI_EVENTO - 1, MINUTI_BASELINE - 1),
             "nota": (

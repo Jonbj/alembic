@@ -988,3 +988,57 @@ def test_la_famiglia_di_ha_resta_dichiarata_in_artefatto():
     # Finche' non e' completa, nessuna correzione e' pubblicata come verdetto.
     assert stato["p_holm"] is None
     assert "non applicata" in stato["nota"]
+
+
+# ---------- Copertura prezzi degradata: dichiarata, non silenziosa ----------
+
+
+def test_la_copertura_prezzi_degradata_e_dichiarata_nell_artefatto():
+    """Un fetch che vuota il campione per meta' va detto, non assorbito.
+
+    Il caso è quello del pilota 2026-09-16: Alpaca rifiuta l'intera richiesta
+    SIP e la finestra si tronca, restano i simboli meno liquidi e l'effetto
+    **gonfia** (+0,678% → +0,936%). Senza dichiarazione, un artefatto con
+    t = 3,4 letta come PASS sarebbe misurato su un campione selezionato dal
+    fallimento stesso — cioè dal difetto che doveva essere escluso.
+
+    La misura non puo' distinguere "nessun titolo scambiato in quei 5 minuti"
+    da "simbolo inesistente": entrambi danno ratio None. Quel che puo' fare, e
+    che e' il suo perimetro, è dichiarare la quota di mancanti: un lettore vede
+    che il campione è coperto al 54% e non lo confonde con una misura piena.
+    """
+    from scripts.event_study_h_a_610 import _esegui_anno
+
+    def loader(symbol: str, start: datetime, end: datetime) -> pd.Series:
+        idx = pd.date_range(start, end, freq="1min", inclusive="left", tz="UTC")
+        if symbol == "MSFT":          # meta' del campione cade
+            return pd.Series(dtype=float)
+        return pd.Series(100.0 * np.exp(np.cumsum(np.random.default_rng(1).normal(0, 0.001, len(idx)))),
+                         index=idx)
+
+    articoli = [
+        _articolo_610(f"a{d}", "AAPL", f"2024-03-{d:02d}T15:30:00Z", "AAPL Reports Q1 Earnings, Beats Estimates")
+        for d in range(1, 16)
+    ] + [
+        _articolo_610(f"m{d}", "MSFT", f"2024-03-{d:02d}T16:30:00Z", "Here Are The Top 5 Upgrades From Last Week")
+        for d in range(1, 16)
+    ]
+
+    risultato = _esegui_anno("2024", articoli, loader, escludi_selezionati=False)
+    copertura = risultato["copertura_prezzi"]
+
+    assert copertura["n_temporale"] == 30
+    assert copertura["n_calcolati"] == 15
+    assert copertura["quota_mancanti"] == pytest.approx(0.5)
+    # Un quarto delle osservazioni manca: dichiarato, e il verdetto lo sa.
+    assert copertura["campione_degradato"] is True
+
+
+def test_un_campione_completo_non_e_marchiato_degradato():
+    """La dichiarazione di degrado deve valere per qualcosa di diverso da 0."""
+    from scripts.event_study_h_a_610 import quota_copertura_prezzi
+
+    assert quota_copertura_prezzi(10, 10)["campione_degradato"] is False
+    assert quota_copertura_prezzi(10, 4)["campione_degradato"] is True
+    # Campione vuoto: non "completo", e nemmeno "quasi completo".
+    assert quota_copertura_prezzi(0, 10)["quota_mancanti"] == pytest.approx(1.0)
