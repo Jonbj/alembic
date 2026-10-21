@@ -487,3 +487,102 @@ def test_una_finestra_a_cavallo_di_mezzanotte_new_york_unisce_i_due_giorni(tmp_p
     secondo = CaricatoreBarreAlpaca(_ClientFinto(errore=AssertionError("non deve chiedere")),
                                     cache_dir=tmp_path, ora=_ORA)
     assert len(secondo("AAPL", t - pd.Timedelta(minutes=30), t + pd.Timedelta(minutes=6))) == 36
+
+
+# ---------- La nulla del rapporto non e' 1 (review PR #641, punto 7) ----------
+
+
+def test_la_nulla_del_rapporto_non_e_uno():
+    """Sotto "nessuna notizia" il rapporto medio NON e' 1: e' 0,955.
+
+    Il numeratore ha 4 log-return, il denominatore 23. La std campionaria e'
+    correttamente piu' piccola di sigma con cosi' pochi gradi di liberta'
+    (fattore c(4)=0,921 contro c(23)=0,989), quindi il rapporto e' sistematicamente
+    sotto 1 anche quando il mercato non reagisce a nulla.
+
+    Conseguenza: testare `media > 1` significa che un gruppo di articoli
+    genuinamente inerti non esce "indistinguibile da 1" ma esce con t negativo —
+    cioe' FAIL su un effetto che non c'e'. Il riferimento giusto e' la nulla a
+    forma chiusa, non 1.
+    """
+    from scripts.event_study_h_a_610 import null_log_rapporto
+
+    # Riferimento Monte Carlo indipendente (rng fissato, 20k campioni).
+    rng = np.random.default_rng(20240305)
+    evento = np.std(rng.normal(0.0, 1.0, (20_000, 4)), axis=1, ddof=1)
+    fondo = np.std(rng.normal(0.0, 1.0, (20_000, 23)), axis=1, ddof=1)
+    monte_carlo = float(np.mean(np.log(evento / fondo)))
+
+    assert null_log_rapporto(4, 23) == pytest.approx(monte_carlo, abs=0.01)
+    # E il riferimento implicito del codice (1.0) sbaglia di questa misura:
+    assert abs(monte_carlo - math.log(1.0)) > 0.10
+
+
+def test_l_eccesso_e_nullo_quando_il_mercato_non_reagisce():
+    """Il percorso vero: nessun evento iniettato, eccesso medio ~ 0.
+
+    `calcola_esito` lavora in spazio logaritmico e sottrae la nulla a forma
+    chiusa della finestra EFFETTIVAMENTE osservata (righe di prezzo diverse da
+    quelle del test precedente cambiano la nulla). Qui nessun picco viene
+    iniettato: l'eccesso deve cadere vicino a zero, mentre il rapporto grezzo
+    resta sotto 1 — esattamente il difetto che rendeva illeggibile il
+    verdetto di H-A.
+    """
+    from scripts.event_study_h_a_610 import calcola_esito
+
+    rng = np.random.default_rng(99)
+    eccessi, rapporti = [], []
+    for giorno in range(40):
+        ts = datetime(2024, 3, 4 + giorno % 20, 15, 0, tzinfo=timezone.utc)
+        # Prezzi con volatilita' costante e nessun evento: ritorni iid.
+        idx = pd.date_range(ts - pd.Timedelta(minutes=30), periods=40, freq="1min", tz="UTC")
+        rets = rng.normal(0.0, 0.001, size=len(idx))
+        prezzi = 100.0 * np.exp(np.cumsum(rets))
+        esito = calcola_esito(ts, pd.Series(prezzi, index=idx))
+        assert esito is not None
+        eccessi.append(esito.eccesso_log)
+        rapporti.append(esito.rapporto)
+
+    # L'eccesso e' centrato su zero per costruzione.
+    assert float(np.mean(eccessi)) == pytest.approx(0.0, abs=0.05)
+    # Il rapporto grezzo, invece, e' sistematicamente sotto 1: il riferimento
+    # implicito di RAPPORTO_H0=1.0 avrebbe letto questi gruppi come FAIL.
+    assert float(np.mean(rapporti)) < 0.99
+
+
+def test_un_picco_reale_sopravvive_al_passaggio_in_space_di_log():
+    """Il riscorretto non spentere la potenza: un picco vero resta positivo.
+
+    Stesso picco di `test_calcola_rapporto_picco_nel_evento`, letto con
+    `calcola_esito`: l'eccesso deve essere nettamente sopra la nulla, altrimenti
+    la correzione avrebbe cancellato il segnale che H-A vuole trovare.
+    """
+    from scripts.event_study_h_a_610 import calcola_esito
+
+    ts = datetime(2024, 3, 5, 14, 30, tzinfo=timezone.utc)
+    esito = calcola_esito(ts, _bars_piccolo_picco(ts, baseline=1.0, evento=3.0))
+
+    assert esito is not None
+    assert esito.eccesso_log > null_log_di_riferimento(esito)
+    assert esito.eccesso_log > 0.5
+
+
+def null_log_di_riferimento(esito) -> float:
+    from scripts.event_study_h_a_610 import null_log_rapporto
+
+    return null_log_rapporto(esito.n_ritorni_evento, esito.n_ritorni_fondo)
+
+
+def test_la_nulla_segue_le_riprezioni_osservate():
+    """Finestra con meno barre ha una nulla diversa: si calcola, non si assume.
+
+    Un articolo misurato su 3 barre di evento ha 2 ritorni, non 4: la sua
+    nulla e' piu' negativa. Applicare la nulla fissa della finestra piena
+    sbiaserebbe proprio gli articoli a bassa copertura, che sono i piu'
+    sospetti di essere rumore.
+    """
+    from scripts.event_study_h_a_610 import null_log_rapporto
+
+    pieno = null_log_rapporto(4, 23)
+    scarso = null_log_rapporto(2, 23)
+    assert scarso < pieno  # meno gradi di liberta' => std piu' piccola => ratio piu' basso

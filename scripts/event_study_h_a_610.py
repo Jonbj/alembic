@@ -55,10 +55,14 @@ from typing import Callable
 
 import numpy as np
 import pandas as pd
+from scipy.special import digamma
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.analysis.dossier.article_coverage import content_empty_title_reason  # noqa: E402
+from src.analysis.dossier.article_coverage import (  # noqa: E402
+    classify_timing,
+    content_empty_title_reason,
+)
 
 # --- parametri congelati dalla pre-registrazione, non rivedibili qui ---
 # Universo watchlist (config/trading.yaml:114) — il sottoinsieme che verra'
@@ -82,10 +86,23 @@ MIN_GIORNI = 2
 # Barra |t| per verdetto PASS/FAIL.
 SOGLIA_T = 3.0
 
-# Atteso: non-CONTENT_EMPTY > 1; CONTENT_EMPTY indistinguibile da 1.
-# Il "rapporto atteso = 1 per i template" e' l'ipotesi nulla: se la loro
-# volatilita' post e' indistinguibile dal fondo, NON separano.
-RAPPORTO_H0 = 1.0
+# Atteso (prereg H-A): non-CONTENT_EMPTY > 1; CONTENT_EMPTY indistinguibile
+# dal fondo.
+#
+# "Indistinguibile" NON vuol dire "rapporto = 1": vuol dire "indistinguibile
+# da quanto il rapporto vale quando il mercato NON reagisce a nulla", e quel
+# valore non e' 1. Il numeratore ha 4 log-return, il denominatore 23; la std
+# campionaria con cosi' pochi gradi di liberta' e' sistematicamente piu'
+# piccola di sigma (c(4)=0,921 contro c(23)=0,989), quindi anche su un titolo
+# che non registra un tubo il rapporto medio cade a 0,955. Testare contro 1
+# fa leggere come FAIL un gruppo genuinamente inerte.
+#
+# Il riferimento e' quindi la nulla a forma chiusa, valutata sulle finestre
+# EFFETTIVAMENTE osservate su ciascun articolo (`null_log_rapporto`), e
+# l'osservabile e' l'eccesso in spazio logaritmico: log(ratio) - nulla.
+# Esso e' centrato su zero per costruzione quando il mercato non reagisce,
+# qualunque sia la copertura di barre, e resta positivo per un picco reale.
+RAPPORTO_H0 = 1.0  # solo nel commento sopra: il riferimento vero e' la nulla
 
 ET = ZoneInfo("America/New_York")
 
@@ -178,20 +195,30 @@ def classifica(titolo: str) -> tuple[bool, str | None]:
 # ---------- Volatility ratio ----------
 
 
-def _volatilita_finestra(close: pd.Series, finestra_inizio: datetime, n_minuti: int) -> float | None:
-    """Std dei log-return nella finestra [inizio, inizio+n_minuti).
+def _ritorni_finestra(
+    close: pd.Series, finestra_inizio: datetime, n_minuti: int
+) -> pd.Series | None:
+    """Log-return della finestra [inizio, inizio+n_minuti), None se insufficienti.
 
-    Restituisce None se la finestra ha meno di 3 barre (servono almeno due
-    log-return per una std campionaria).
+    Servono almeno due ritorni: con uno solo `std(ddof=1)` e' NaN, che prima
+    passava il filtro ``ratio is not None`` e avvelenava media e SE.
     """
     fine = finestra_inizio + pd.Timedelta(minutes=n_minuti)
     barre = close[(close.index >= finestra_inizio) & (close.index < fine)]
     if len(barre) < 2:
         return None
     log_ret = np.log(barre / barre.shift(1)).dropna()
-    # Con un solo log-return std(ddof=1) e' NaN: prima passava il filtro
-    # ``ratio is not None`` e avvelenava media e SE.
-    if len(log_ret) < 2:
+    return log_ret if len(log_ret) >= 2 else None
+
+
+def _volatilita_finestra(close: pd.Series, finestra_inizio: datetime, n_minuti: int) -> float | None:
+    """Std dei log-return nella finestra [inizio, inizio+n_minuti).
+
+    Restituisce None se la finestra non ha abbastanza barre per una std
+    campionaria.
+    """
+    log_ret = _ritorni_finestra(close, finestra_inizio, n_minuti)
+    if log_ret is None:
         return None
     vol = float(log_ret.std(ddof=1))
     return vol if math.isfinite(vol) else None
@@ -211,6 +238,10 @@ def calcola_rapporto(
     mercati mostrano su flash rumorosi.
 
     Restituisce None se una delle due finestre e' vuota o ha < 2 barre.
+
+    Sopravvive perche' descrive la grandezza grezza; l'osservabile che finisce
+    nell'artefatto e' `calcola_esito` — il rapporto da solo non e' confrontabile
+    con 1 (vedi `null_log_rapporto`).
     """
     baseline_inizio = ts - pd.Timedelta(minutes=30)
     vol_baseline = _volatilita_finestra(close, baseline_inizio, finestra_baseline)
@@ -222,6 +253,81 @@ def calcola_rapporto(
         # segnalare un effetto dove il fondo non esiste.
         return None
     return vol_evento / vol_baseline
+
+
+# ---------- La nulla del rapporto ----------
+
+
+def null_log_rapporto(ritorni_evento: int, ritorni_fondo: int) -> float:
+    """E[log(s_evento/s_fondo)] quando nessuna notizia muove il prezzo.
+
+    Per una std campionaria (ddof=1) su k ritorni indipendenti,
+    ``s^2/sigma^2 ~ chi2_{k-1}/(k-1)``, quindi
+
+        E[log s] = 0.5 * psi((k-1)/2) + 0.5 * log 2 - 0.5 * log(k-1)
+
+    Il termine in psi() e' la correzione per gradi di liberta': e' negativo per
+    k piccoli e tende a zero per k grandi. Per la finestra pre-registrata
+    (5 barre di evento, 24 di fondo) vale -0.1614: **anche un titolo fermo dà
+    un rapporto medio di 0.955**, non di 1.
+
+    Non e' una taratura: e' la proprietà della stima, calcolata e non scelta.
+    """
+    if ritorni_evento < 2 or ritorni_fondo < 2:
+        raise ValueError("servono almeno 2 ritorni per finestra")
+    def elog(k: int) -> float:
+        return 0.5 * float(digamma((k - 1) / 2.0)) + 0.5 * math.log(2.0) - 0.5 * math.log(k - 1)
+    return elog(ritorni_evento) - elog(ritorni_fondo)
+
+
+@dataclass
+class EsitoVolatilita:
+    """Esito per un articolo: il rapporto grezzo e il suo eccesso sulla nulla.
+
+    `eccesso_log` e' l'osservabile della misura: log(rapporto) meno la nulla
+    delle finestre effettivamente osservate. Vale zero per costruzione quando il
+    mercato non reagisce, a qualunque copertura di barre — che e' la definizione
+    di "indistinguibile dal fondo" che H-A deve poter pronunciare.
+
+    `rapporto` resta nell'artefatto perche' e' la grandezza che la
+    pre-registrazione scrive: 0,955 non e' un difetto del titolo, e' la
+    correzione per gradi di liberta'.
+    """
+
+    rapporto: float
+    eccesso_log: float
+    n_ritorni_evento: int
+    n_ritorni_fondo: int
+
+
+def calcola_esito(
+    ts: datetime,
+    close: pd.Series,
+    *,
+    finestra_evento: int = MINUTI_EVENTO,
+    finestra_baseline: int = MINUTI_BASELINE,
+) -> EsitoVolatilita | None:
+    """Rapporto di volatilita' ed eccesso sulla nulla delle finestre osservate.
+
+    None quando una delle due finestre non e' calcolabile: un buco di copertura
+    non e' un'osservazione (vedi `VolatilityRatio`).
+    """
+    baseline_inizio = ts - pd.Timedelta(minutes=30)
+    ritorni_evento = _ritorni_finestra(close, ts, finestra_evento)
+    ritorni_fondo = _ritorni_finestra(close, baseline_inizio, finestra_baseline)
+    if ritorni_evento is None or ritorni_fondo is None:
+        return None
+    rapporto = calcola_rapporto(ts, close, finestra_evento=finestra_evento,
+                                finestra_baseline=finestra_baseline)
+    if rapporto is None or rapporto <= 0.0:
+        return None
+    nulla = null_log_rapporto(len(ritorni_evento), len(ritorni_fondo))
+    return EsitoVolatilita(
+        rapporto=rapporto,
+        eccesso_log=math.log(rapporto) - nulla,
+        n_ritorni_evento=len(ritorni_evento),
+        n_ritorni_fondo=len(ritorni_fondo),
+    )
 
 
 # ---------- Cooldown anti-doppione ----------
