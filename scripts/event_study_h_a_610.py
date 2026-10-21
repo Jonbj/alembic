@@ -178,6 +178,30 @@ def parse_timestamp(value: str) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def ticker_primario(simboli: list | None) -> str | None:
+    """Il ticker primario dell'articolo, secondo la regola di produzione.
+
+    Il percorso live porta ogni simbolo attraverso `canonicalizza_ticker`
+    (`src/workers/ingestion.py:701`) prima di farne un segnale: e' la regola
+    scritta per riparare #226, dove `BRKB` restava se stesso e 96 segnali — sei
+    dei quali sopra il gate — non incontravano mai `BRK.B` della watchlist.
+    Importata, non ricopiata (regola #169/#467).
+
+    `symbols[0].upper()` non e' quella regola: Benzinga scrive `BRK-B`, la
+    watchlist `BRK.B`, e con il solo `.upper()` ogni articolo di Berkshire
+    chiederebbe le barre di un simbolo che la watchlist non contiene. Non
+    sarebbe un errore ma un buco di copertura, e l'artefatto lo conterebbe fra
+    i mancanti senza dire perche'. Il primo simbolo e' quello che la pipeline
+    assegna al segnale (`asset_tags[0]` in `sentiment.run_inference`), quindi
+    qui non c'e' una riduzione da scegliere: c'e' un ticker da normalizzare.
+    """
+    from src.workers.ingestion import canonicalizza_ticker
+
+    if not simboli:
+        return None
+    return canonicalizza_ticker(str(simboli[0])) or None
+
+
 # ---------- Classificazione ----------
 
 

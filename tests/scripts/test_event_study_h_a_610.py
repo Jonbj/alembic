@@ -764,3 +764,55 @@ def test_i_confini_di_seduta_seguono_l_ora_legale():
     # La chiusura segue lo stesso spostamento.
     assert estate[1].hour == 20
     assert inverno[1].hour == 21
+
+
+# ---------- Ticker canonico (regola #169/#467: la riduzione e' di produzione) ----------
+
+
+def test_il_ticker_primario_passa_dalla_canonizzazione_di_produzione():
+    """`simboli[0].upper()` non e' la riduzione di produzione.
+
+    Il percorso live porta ogni simbolo attraverso `canonicalizza_ticker`
+    (`src/workers/ingestion.py:701`) prima di usarlo: e' la regola che ha
+    riparato #226, dove `BRKB` restava `BRKB` e 96 segnali — sei dei quali
+    sopra il gate — non trovavano mai `BRK.B` in watchlist.
+
+    Benzinga scrive `BRK-B`; la watchlist scrive `BRK.B`. Con `.upper()` H-A
+    chiederebbe le barre di `BRK-B` ad Alpaca e riceverebbe una serie vuota
+    per ogni articolo di Berkshire: non un errore, un buco di copertura che
+    l'artefatto conterebbe fra i mancanti senza dire perché.
+    """
+    from scripts.event_study_h_a_610 import ticker_primario
+
+    assert ticker_primario(["BRK-B"]) == "BRK.B"
+    assert ticker_primario(["brk-b"]) == "BRK.B"
+    assert ticker_primario(["aapl", "msft"]) == "AAPL"
+
+
+def test_l_articolo_senza_ticker_non_ha_ticker_primario():
+    """Nessun simbolo => nessuna misura: la pipeline live lo scarta gia' li'."""
+    from scripts.event_study_h_a_610 import ticker_primario
+
+    assert ticker_primario([]) is None
+    assert ticker_primario(None) is None
+
+
+def test_il_simbolo_passo_viene_conservato_e_non_inventato():
+    """Cosa `canonicalizza_ticker` NON fa: non è un validatore.
+
+    Un simbolo che non conosce passa invariato — per disegno, perché la sua
+    funzione è riportare alla forma della watchlist, non decidere se il
+    simbolo è legittimo. Il validatore del percorso live è un altro:
+    `sentiment.run_inference` scarta l'item quando `sanitize_ticker` non
+    restituisce un simbolo.
+
+    Lo dichiaro perché il conteggio dei mancanti di H-A non distingue "simbolo
+    inesistente" da "nessun titolo scambiato in quei 5 minuti": se i due
+    casi si confondessero, il buco BRK-B della prima versione sarebbe
+    invisibile.
+    """
+    from scripts.event_study_h_a_610 import ticker_primario
+
+    assert ticker_primario(["BRK-B"]) == "BRK.B"   # noto, riportato
+    assert ticker_primario(["\x00\x01"]) == "\x00\x01"  # ignoto, passato
+    assert ticker_primario([]) is None
