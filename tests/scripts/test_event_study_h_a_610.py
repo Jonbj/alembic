@@ -816,3 +816,90 @@ def test_il_simbolo_passo_viene_conservato_e_non_inventato():
     assert ticker_primario(["BRK-B"]) == "BRK.B"   # noto, riportato
     assert ticker_primario(["\x00\x01"]) == "\x00\x01"  # ignoto, passato
     assert ticker_primario([]) is None
+
+
+# ---------- Integrazione: il percorso composto produce il verdetto di H-A ----------
+
+
+def _articolo_610(
+    identificativo: str, ticker: str, ts: str, titolo: str
+) -> dict:
+    return {
+        "id": identificativo,
+        "created_at": ts,
+        "updated_at": ts,
+        "symbols": [ticker],
+        "headline": titolo,
+        "summary": "Corpo.",
+        "content": "<p>Corpo.</p>",
+    }
+
+
+def test_il_percorso_composto_puo_pronunciare_separa_e_indistinguibile():
+    """Su `_esegui_anno`: nessun evento, ma i due gruppi si separano lo stesso.
+
+    E' la regressione che lega i tre fix. Il picco e' identico per tutti gli
+    articoli — cioe' il mercato non reagisce a nessuna delle notizie, e il
+    rapporto grezzo resta sotto 1 per tutti. Prima: entrambi i gruppi escono
+    FAIL e H-A non puo' pronunciare "indistinguibile", che e' la sua risposta
+    attesa. Ora: se il detector e' davvero inerte l'eccesso e' ~0 per tutti e il
+    verdetto e' INDISTINGUIBILE; se distingue, SEPARA.
+
+    Il test fallisce se il verdetto dipende dal riferimento implicito 1.0.
+    """
+    from scripts.event_study_h_a_610 import _esegui_anno
+
+    rng = np.random.default_rng(4242)
+
+    def loader(symbol: str, start: datetime, end: datetime) -> pd.Series:
+        # Nessun evento: prezzo con volatilita' costante, rumore iid.
+        idx = pd.date_range(start, end, freq="1min", inclusive="left", tz="UTC")
+        return pd.Series(100.0 * np.exp(np.cumsum(rng.normal(0, 0.0008, len(idx)))), index=idx)
+
+    articoli = []
+    for giorno in range(1, 26):
+        for ticker in ("AAPL", "MSFT"):
+            articoli.append(_articolo_610(
+                f"template-{ticker}-{giorno}", ticker,
+                f"2024-03-{giorno:02d}T15:30:00Z",
+                "Here Are The Top 5 Upgrades From Last Week",   # template
+            ))
+            articoli.append(_articolo_610(
+                f"normale-{ticker}-{giorno}", ticker,
+                f"2024-03-{giorno:02d}T16:30:00Z",
+                f"{ticker} Reports Q1 Earnings, Beats Estimates",
+            ))
+
+    risultato = _esegui_anno("2024", articoli, loader, escludi_selezionati=False)
+    confronto = risultato["confronto_gruppi"]
+
+    # Nessuna notizia muove il prezzo: nessuna separazione, e nessun FAIL.
+    assert confronto["verdetto"] in {"INDISTINGUIBILE", "INSUFFICIENT_N"}
+    assert confronto["verdetto"] != "SEPARA" or abs(confronto["t"]) >= 3.0
+    # I due gruppi sono entrambi popolati e la provenienza dichiarata. Il
+    # valore e' la stringa che restituisce il detector di produzione, non
+    # un'etichetta dello script: se i due divergono, l'artefetto attribuisce
+    # a una marca del detector una provenienza che non e'.
+    assert confronto["n_giorni_appaiate"] >= 2
+    assert risultato["gruppo_content_empty"]["provenienza"]["RATINGS_LISTICLE_TEMPLATE"] > 0
+
+
+def test_il_confronto_e_il_verdetto_principale_del_artefatto():
+    """L'artefatto dichiara il confronto oltre ai due gruppi presi a se'."""
+    from scripts.event_study_h_a_610 import _esegui_anno
+
+    def loader(symbol: str, start: datetime, end: datetime) -> pd.Series:
+        idx = pd.date_range(start, end, freq="1min", inclusive="left", tz="UTC")
+        return pd.Series(100.0 + np.arange(len(idx)) * 0.01, index=idx)
+
+    articoli = [
+        _articolo_610("a", "AAPL", "2024-03-05T15:30:00Z", "Here Are The Top 5 Upgrades From Last Week"),
+        _articolo_610("b", "MSFT", "2024-03-06T15:30:00Z", "MSFT Reports Q1 Earnings, Beats Estimates"),
+    ]
+    risultato = _esegui_anno("2024", articoli, loader, escludi_selezionati=False)
+
+    assert "confronto_gruppi" in risultato
+    for campo in ("differenza", "t", "n_giorni_appaiate", "effetto_rilevabile_a_t3", "verdetto"):
+        assert campo in risultato["confronto_gruppi"]
+    # Il riferimento usato e' dichiarato: 1.0 non e' la nulla.
+    assert risultato["riferimento_riportato"]["log"] != 0.0

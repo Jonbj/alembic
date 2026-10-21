@@ -785,59 +785,77 @@ def _esegui_anno(
     *,
     escludi_selezionati: bool,
 ) -> dict:
-    """Misura per un singolo anno, un singolo gruppo di esclusione."""
+    """Misura per un singolo anno, un singolo gruppo di esclusione.
+
+    L'osservabile e' l'eccesso in spazio logaritmico sulla nulla delle finestre
+    osservate (`calcola_esito`), non il rapporto grezzo: il rapporto di per se'
+    non e' confrontabile con 1 e la differenza fra i due gruppi e' il verdetto
+    che H-A deve pronunciare (`confronto_gruppi`).
+    """
     ratios: list[VolatilityRatio] = []
-    counts = {"totale": 0, "scarto_no_ticker": 0, "scarto_cooldown": 0}
+    osservazioni: list[tuple[str, str | None, str, float]] = []
+    counts = Counter({
+        "totale": 0, "scarto_no_ticker": 0, "scarto_cooldown": 0,
+        "scarto_selezionati_sull_esito": 0,
+    })
 
     # Cooldown per (ticker, giorno) — tiene il primo visto.
-    visti: set[tuple[str, str, datetime]] = set()
+    visti: dict[tuple[str, str], datetime] = {}
 
     for articolo in articoli_anno:
         counts["totale"] += 1
-        simboli = articolo.get("symbols") or []
-        if not simboli:
+        ticker = ticker_primario(articolo.get("symbols"))
+        if ticker is None:
             counts["scarto_no_ticker"] += 1
             continue
-        # ticker primario = asset_tags[0], come nel resto della pipeline.
-        ticker = str(simboli[0]).upper()
         if escludi_selezionati and ticker in SELEZIONATI_SULL_ESITO:
+            # Contato: senza questo la somma dei componenti non riconcilia con
+            # `totale` e il buco si legge solo per sottrazione.
+            counts["scarto_selezionati_sull_esito"] += 1
             continue
         ts = parse_timestamp(str(articolo["created_at"]))
         # Giornata di mercato: America/New_York (le news dopo le 20:00 ET
         # cadrebbero nel giorno UTC successivo).
         giorno = ts.astimezone(ET).strftime("%Y-%m-%d")
-        chiave = (ticker, giorno, ts)
-        # Cooldown: collassa articoli dello stesso ticker entro 5 min.
-        skip = False
-        for k in visti:
-            if k[0] == ticker and k[1] == giorno:
-                if within_cooldown(k[2], ts, COOLDOWN_MINUTI, ticker_a=ticker, ticker_b=ticker):
-                    skip = True
-                    break
-        if skip:
+        # Cooldown: collassa articoli dello stesso ticker entro 5 min. La
+        # chiave e' (ticker, giorno) e il valore l'ultimo istante visto: il
+        # confronto diretto evita di scansionare l'elenco per ogni articolo,
+        # che su 92k righe era un O(n^2) che non finiva.
+        chiave = (ticker, giorno)
+        precedente = visti.get(chiave)
+        if precedente is not None and within_cooldown(
+            precedente, ts, COOLDOWN_MINUTI, ticker_a=ticker, ticker_b=ticker
+        ):
             counts["scarto_cooldown"] += 1
             continue
-        visti.add(chiave)
+        visti[chiave] = ts
 
         # Finestra di misura: T-30..T+5 minuti (piu' un margine di 1 minuto
         # per coprire l'inclusione esclusiva dell'evento).
         inizio = ts - pd.Timedelta(minutes=30)
         fine = ts + pd.Timedelta(minutes=MINUTI_EVENTO + 1)
         bars = fetch_minute_bars(ticker, inizio, fine, loader=loader)
-        ratio = calcola_rapporto(ts, bars)
-        content_empty, _ = classifica(str(articolo.get("headline") or ""))
+        esito = calcola_esito(ts, bars)
+        apertura, chiusura = bounds_seduta(ts)
+        timing = classifica_timing(ts, apertura, chiusura)
+        gruppo, provenienza = gruppo_del_detector(str(articolo.get("headline") or ""), timing)
+        ratio = esito.rapporto if esito is not None else None
+        counts["temporale"] += 1
         ratios.append(
             VolatilityRatio(
                 articolo_id=str(articolo.get("id")),
                 ticker=ticker,
                 timestamp=ts,
-                content_empty=content_empty,
+                content_empty=gruppo == "content_empty",
                 ratio=ratio,
                 giorno=giorno,
             )
         )
+        if esito is not None:
+            osservazioni.append((gruppo, provenienza, giorno, esito.eccesso_log))
 
     out: dict[str, dict] = {}
+    per_gruppo = raggruppa_per_gruppo(osservazioni)
     for gruppo, filtro in (
         ("content_empty", lambda r: r.content_empty),
         ("non_content_empty", lambda r: not r.content_empty),
@@ -845,6 +863,7 @@ def _esegui_anno(
         stat = media_delle_medie_giornaliere(
             [(r.giorno, r.ratio) for r in ratios if filtro(r)]
         )
+        voce = per_gruppo.get(gruppo, {})
         out[gruppo] = {
             "n": stat.n_obs,
             "n_giorni": stat.n_giorni,
@@ -852,18 +871,44 @@ def _esegui_anno(
             "t": stat.t,
             "effetto_rilevabile_a_t3": stat.effetto_rilevabile_a_t3,
             "verdetto": _verdetto(stat.media, stat.t, stat.effetto_rilevabile_a_t3),
+            "n_osservazioni": voce.get("n", 0),
+            "provenienza": voce.get("provenienza", {}),
         }
+
+    confronto = confronto_gruppi([(g, giorno, v) for g, _, giorno, v in osservazioni])
 
     return {
         "anno": anno,
         "selezionati_esclusi": escludi_selezionati,
-        "conteggi_pipeline": counts,
-        "n_rapporti_calcolati": len(osservazioni_valide([(r.giorno, r.ratio) for r in ratios])),
-        "n_rapporti_mancanti": len(ratios) - len(
-            osservazioni_valide([(r.giorno, r.ratio) for r in ratios])
-        ),
+        "conteggi_pipeline": dict(counts),
+        "n_rapporti_calcolati": len(osservazioni),
+        "n_rapporti_mancanti": counts["temporale"] - len(osservazioni),
+        "riferimento_riportato": {
+            "log": null_log_rapporto(MINUTI_EVENTO - 1, MINUTI_BASELINE - 1),
+            "nota": (
+                "Il riferimento non e' 1 ma la nulla a forma chiusa della std "
+                "campionaria con 4 e 23 gradi di liberta'. L'osservabile e' "
+                "l'eccesso in spazio logaritmico: e' centrato su zero quando il "
+                "mercato non reagisce, qualunque sia la copertura di barre."
+            ),
+        },
         "gruppo_content_empty": out.get("content_empty", {}),
         "gruppo_non_content_empty": out.get("non_content_empty", {}),
+        "confronto_gruppi": {
+            "differenza": confronto.differenza,
+            "t": confronto.t,
+            "se": confronto.se,
+            "effetto_rilevabile_a_t3": confronto.effetto_rilevabile_a_t3,
+            "n_giorni_appaiate": confronto.n_giorni_appaiate,
+            "n_giorni_content_empty": confronto.n_giorni_content_empty,
+            "n_giorni_non_content_empty": confronto.n_giorni_non_content_empty,
+            "verdetto": confronto.verdetto,
+            "lettura": (
+                "SEPARA = gli articoli che il detector riconosce si "
+                "comportano come gli altri; INDISTINGUIBILE = non separano, e "
+                "la Leva A di #607 non e' appoggiata a questa evidenza."
+            ),
+        },
     }
 
 
