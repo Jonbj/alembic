@@ -672,3 +672,95 @@ def test_dispersione_nulla_con_differenza_non_nulla_non_autorizza_pass():
     assert esito.se == 0.0
     assert math.isnan(esito.t) or math.isinf(esito.t)
     assert esito.verdetto == "INSUFFICIENT_N"
+
+
+# ---------- classify_timing (review PR #641, punto 6) ----------
+
+
+def test_la_classificazione_del_timing_delega_al_rilevatore_di_produzione():
+    """H-A nomina `classify_timing` accanto a `content_empty_title_reason`.
+
+    Il rilevatore di #607 filtra su RETROSPECTIVE **e** CONTENT_EMPTY: sono due
+    marche diverse e la Leva A scarterebbe gli articoli di entrambe. Misurare
+    solo la seconda lascia mettere a tacere metà della leva con un t verde.
+
+    La classificazione e' delegata, non ricostruita (regola #169/#467): i
+    limiti di seduta li decide il calendario, e qui devono essere gli stessi
+    che in produzione.
+    """
+    from scripts.event_study_h_a_610 import bounds_seduta, classifica_timing
+
+    # Un istante di giornata: midnight UTC e' il 4 marzo a New York, quindi
+    # `bounds_seduta` aggancia correttamente la seduta precedente.
+    apertura, chiusura = bounds_seduta(datetime(2024, 3, 5, 15, 0, tzinfo=timezone.utc))
+    assert (apertura, chiusura) == (
+        datetime(2024, 3, 5, 14, 30, tzinfo=timezone.utc),   # 09:30 ET = 14:30 UTC (EST)
+        datetime(2024, 3, 5, 21, 0, tzinfo=timezone.utc),    # 16:00 ET = 21:00 UTC
+    )
+
+    # Prima dell'apertura, dentro, dopo: le tre marche di production.
+    assert classifica_timing("2024-03-05T13:00:00Z", apertura, chiusura) == "ANTICIPATORY"
+    assert classifica_timing("2024-03-05T15:00:00Z", apertura, chiusura) == "CONCURRENT"
+    assert classifica_timing("2024-03-05T22:00:00Z", apertura, chiusura) == "RETROSPECTIVE"
+
+
+def test_l_articolo_che_o_il_livello_dossier_taggia_content_empty():
+    """L'esito di H-A copre i due gruppi che #607 vuole filtrare.
+
+    Un RETROSPECTIVE non templatizzato e' un CONTENT_EMPTY per il livello
+    dossier (`_content_empty_reason` restituisce RETROSPECTIVE_TIMING), ma non
+    per `content_empty_title_reason`: i due predicati non coincidono, ed e' il
+    motivo per cui il gruppo va pubblicato con la sua provenienza.
+    """
+    from src.analysis.dossier.article_coverage import (
+        _content_empty_reason,
+        content_empty_title_reason,
+    )
+
+    # Un titolo qualsiasi, niente template: il predicato sul titolo no.
+    assert content_empty_title_reason("Box Expands Its Partnership With Microsoft") is None
+    # Ma il percorso di produzione lo marca CONTENT_EMPTY per il timing.
+    assert _content_empty_reason([{"title": "Box Expands Its Partnership"}], "ISSUER_SPECIFIC", "RETROSPECTIVE") \
+        == "RETROSPECTIVE_TIMING"
+
+
+def test_l_artefatto_pubblica_i_due_gruppi_con_la_loro_provenienza():
+    """Ogni osservazione porta con se' *perche'* e' nel suo gruppo.
+
+    Senza questa colonna un lettore non può distinguere «template riconosciuto
+    dal titolo» da «articolo fuori tempo massimo», che sono filtri diversi con
+    lo stesso nome: aggiungerne uno non implementa l'altro.
+    """
+    from scripts.event_study_h_a_610 import raggruppa_per_gruppo
+
+    osservazioni = [
+        ("content_empty", "TEMPLATE_TITLE", "2024-03-05", 1.5),
+        ("content_empty", "RETROSPECTIVE_TIMING", "2024-03-06", 1.4),
+        ("non_content_empty", None, "2024-03-05", 2.0),
+    ]
+    per_gruppo = raggruppa_per_gruppo(osservazioni)
+
+    assert per_gruppo["content_empty"]["provenienza"] == {"TEMPLATE_TITLE": 1, "RETROSPECTIVE_TIMING": 1}
+    assert per_gruppo["non_content_empty"]["provenienza"] == {}
+
+
+def test_i_confini_di_seduta_seguono_l_ora_legale():
+    """Luglio (EDT) e inverno (EST): la stessa ora locale, un'ora UTC di scarto.
+
+    Copre il difetto che `bounds_seduta` dichiara di evitare: la crontab
+    `14-21` di `celery_app.py` e' giusta d'estate e sbagliata d'inverno, e
+    sbaglierebbe di un'ora per meta' anno — quindi metterebbe a metà degli
+    articoli diurno la marca RETROSPECTIVE che li vorrebbe ANTICIPATORY.
+    """
+    from scripts.event_study_h_a_610 import bounds_seduta
+
+    # 10 luglio 2024: EDT, 09:30 locale = 13:30 UTC
+    estate = bounds_seduta(datetime(2024, 7, 10, 15, 0, tzinfo=timezone.utc))
+    # 10 dicembre 2024: EST, 09:30 locale = 14:30 UTC
+    inverno = bounds_seduta(datetime(2024, 12, 10, 15, 0, tzinfo=timezone.utc))
+
+    assert estate[0].hour == 13
+    assert inverno[0].hour == 14
+    # La chiusura segue lo stesso spostamento.
+    assert estate[1].hour == 20
+    assert inverno[1].hour == 21

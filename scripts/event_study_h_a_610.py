@@ -46,7 +46,7 @@ import argparse
 import json
 import math
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -190,6 +190,70 @@ def classifica(titolo: str) -> tuple[bool, str | None]:
     """
     reason = content_empty_title_reason(titolo)
     return (reason is not None, reason)
+
+
+# ---------- Timing (review PR #641, punto 6) ----------
+
+
+def bounds_seduta(giorno: datetime) -> tuple[datetime, datetime]:
+    """Apertura e chiusura della seduta di `giorno`, in UTC.
+
+    Riprende le costanti di `src/workers/market_clock.py` invece di riscriverle
+    (regola #169/#467): la crontab `14-21` di `celery_app.py` sbaglierebbe di
+    un'ora per meta' anno. Lo stesso modulo dichiara cosa NON modella —
+    festivita' e chiusure anticipate: qui vale uguale, con un artefatto che
+    dichiara il limite invece di lasciare che si creda esatta.
+
+    Il giorno di riferimento e' quello **New York** dell'articolo: la finestra
+    di misura segue `created_at` localizzato, non il giorno UTC.
+    """
+    from src.workers.market_clock import _REGULAR_CLOSE, _REGULAR_OPEN
+
+    locale = giorno.astimezone(ET) if giorno.tzinfo else giorno.replace(tzinfo=timezone.utc).astimezone(ET)
+    data = locale.date()
+    return (
+        datetime.combine(data, _REGULAR_OPEN, tzinfo=ET).astimezone(timezone.utc),
+        datetime.combine(data, _REGULAR_CLOSE, tzinfo=ET).astimezone(timezone.utc),
+    )
+
+
+def classifica_timing(pubblicato: str | datetime, apertura: datetime, chiusura: datetime) -> str:
+    """ANTICIPATORY / CONCURRENT / RETROSPECTIVE, delegato al rilevatore live.
+
+    La Leva A di #607 filtra su `RETROSPECTIVE` **e** `CONTENT_EMPTY`: due
+    marche distinte, e misurare solo la seconda fa mettere a tacere metà della
+    leva su un t verde. La classificazione resta quella di produzione
+    (`classify_timing` importato): i limiti di seduta li decide il calendario.
+    """
+    return classify_timing(pubblicato, apertura, chiusura)
+
+
+def gruppo_del_detector(titolo: str, timing: str) -> tuple[str, str | None]:
+    """Il gruppo di H-A e la sua provenienza, con le due marche della Leva A.
+
+    `content_empty_title_reason` riconosce i template dal titolo;
+    `_content_empty_reason` (la funzione che il livello dossier usa davvero)
+    aggiunge `RETROSPECTIVE_TIMING` e lo applica **solo** dopo aver stabilito
+    ISSUER_SPECIFIC. Chiamo la regola di produzione, non una mia versione:
+    due predicati diversi con lo stesso nome produrrebbero una misura che
+    attribuisce a un filtro l'effetto di un altro.
+    """
+    from src.analysis.dossier.article_coverage import _content_empty_reason
+
+    reason = _content_empty_reason(
+        [{"title": titolo}], ISSUER_SPECIFIC, timing
+    )
+    if reason is not None:
+        return "content_empty", reason
+    return "non_content_empty", None
+
+
+# La rilevanza che il livello dossier usa per applicare il sotto-tag. Fissa
+# qui perche' la classificazione dell'articolo non e' l'oggetto di H-A (che
+# guarda il trigger, non l'attribuzione) e perche' gli articoli dell'archivio
+# portano i `symbols` del provider, non un ground truth: dichiararlo e' il modo
+# perche' chi legge l'artefatto sappia cosa non e' stato misurato.
+ISSUER_SPECIFIC = "ISSUER_SPECIFIC"
 
 
 # ---------- Volatility ratio ----------
@@ -427,6 +491,31 @@ def _medie_giornaliere(osservazioni: list[tuple[str, float]]) -> dict[str, float
     for giorno, valore in osservazioni_valide(osservazioni):
         per_giorno[giorno].append(valore)
     return {g: float(np.mean(v)) for g, v in per_giorno.items()}
+
+
+def raggruppa_per_gruppo(
+    osservazioni: list[tuple[str, str | None, str, float]]
+) -> dict[str, dict]:
+    """Conteggi e provenienza per gruppo, sull'eccesso in spazio logaritmico.
+
+    ``osservazioni`` = (gruppo, provenienza, giorno, eccesso_log). La
+    provenienza (TEMPLATE_TITLE / RETROSPECTIVE_TIMING) finisce nell'artefatto:
+    senza di essa un lettore non può distinguere i due filtri della Leva A,
+    che portano lo stesso nome e hanno effetti potenzialmente diversi.
+    """
+    out: dict[str, dict] = {}
+    for gruppo, provenienza, giorno, valore in osservazioni:
+        voce = out.setdefault(gruppo, {
+            "n": 0, "giorni": set(), "provenienza": Counter(),
+        })
+        voce["n"] += 1
+        voce["giorni"].add(giorno)
+        if provenienza:
+            voce["provenienza"][provenienza] += 1
+    for voce in out.values():
+        voce["n_giorni"] = len(voce.pop("giorni"))
+        voce["provenienza"] = dict(sorted(voce["provenienza"].items()))
+    return out
 
 
 def confronto_gruppi(osservazioni: list[tuple[str, str, float]]) -> EsitoConfronto:
