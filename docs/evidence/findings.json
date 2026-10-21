@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "prossimo_id": 96,
+  "prossimo_id": 97,
   "findings": [
     {
       "id": "F-001",
@@ -7850,6 +7850,25 @@
       ],
       "costo_cumulato_usd": 0,
       "occorrenze_non_stimate": 1,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-096",
+      "titolo": "Il consumatore della coda sentiment (worker-inference) si ferma in warm shutdown e resta assente per sedute intere: zero righe news_log e zero segnali su 96/96 simboli, coda news-stream in crescita, nessun alert",
+      "tipo": "difetto",
+      "confidenza": "congetturale",
+      "primo_avvistamento": "2026-10-09",
+      "occorrenze": [
+        {
+          "data": "2026-10-09",
+          "costo_usd": 291.55,
+          "nota": "2026-10-09: worker-inference warm shutdown 2026-10-08 16:20Z, nessun log del 10-09; beat emette 32 sentiment-worker mai ricevuti; news_queue_census queue_depth 326 -> 1008; news_log vuota dal 10-08 17:00Z al 10-16 13:00Z; stream con 391 titoli (TMUS 77, AMZN 107, ORCL 25, BABA 5).",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-09.md §8"
+        }
+      ],
+      "costo_cumulato_usd": 291.55,
+      "occorrenze_non_stimate": 0,
       "stato": "aperto",
       "issue": null
     }
