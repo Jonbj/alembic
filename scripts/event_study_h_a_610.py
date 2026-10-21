@@ -56,6 +56,7 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 from scipy.special import digamma
+from scipy import stats as stats_t
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -595,6 +596,101 @@ def confronto_gruppi(osservazioni: list[tuple[str, str, float]]) -> EsitoConfron
     )
 
 
+# ---------- Holm-Bonferroni sulla famiglia delle cinque ipotesi ----------
+
+
+def p_value_da_t(t: float, n_giorni: int) -> float | None:
+    """p a due code per l'ipotesi di differenza nulla, con n-1 gradi di liberta'.
+
+    Il t di H-A nasce da una media di differenze giornaliere appaiate, quindi il
+    riferimento sono i gradi di liberta' delle giornate appaiate meno uno — non
+    il numero di articoli. Dimenticarlo e' il modo tipico di gonfiare la
+    significativita': con 20.000 articoli e 40 giornate, |t| = 4 sul numero
+    sbagliato di gradi si presenta come se fosse misurato su 40 osservazioni
+    indipendenti.
+    """
+    if not math.isfinite(t) or n_giorni < 2:
+        return None
+    return float(2.0 * stats_t.t.sf(abs(t), n_giorni - 1))
+
+
+def holm(
+    p_value: dict[str, float],
+    *,
+    alfa: float = 0.05,
+    indecidibili: dict[str, str] | None = None,
+) -> dict:
+    """Correzione di Holm-Bonferroni su una famiglia di ipotesi.
+
+    Ordina per p crescente e confronta il k-esimo con `alfa / (m - k + 1)`: le
+    ipotesi si rifiutano in ordine finche' una non passa, e da li in poi nessuna.
+    Le soglie **crescono** con il rango (0,01; 0,0125; …; 0,05 per m = 5): e'
+    cio' che rende Holm piu' potente di Bonferroni, che moltiplicherebbe ogni p
+    per m e userebbe la soglia 0,05 per tutte.
+
+    Le ipotesi **indecidibili** (`INSUFFICIENT_N`) non entrano nella famiglia: un
+    p non e' stato calcolato e trattarlo come p = 1 gonfierebbe la correzione
+    degli altri indebolendo l'intera famiglia. Restano pero' dichiarate, perche'
+    una famiglia con un buco e' una famiglia da cui manca un membro — e il
+    lettore deve saperlo.
+    """
+    ordinati = sorted(p_value.items(), key=lambda kv: kv[1])
+    m = len(ordinati)
+    esito: dict[str, dict] = {}
+    fermo = False
+    for posizione, (nome, p) in enumerate(ordinati, start=1):
+        soglia = alfa / (m - posizione + 1)
+        rifiutata = (not fermo) and p <= soglia
+        if not rifiutata:
+            fermo = True
+        esito[nome] = {
+            "p": p, "soglia": soglia, "rifiutata": rifiutata, "posizione": posizione,
+        }
+    if indecidibili:
+        esito["indecidibili"] = dict(indecidibili)
+        esito["m"] = m
+    return esito
+
+
+FAMIGLIA_PRIMARIA = ("H-A", "H-B", "H-C", "H-E", "H-F")
+
+
+def stato_famiglia_holm(
+    *, p_value: float | None, famiglia_attese: tuple[str, ...], ipotesi_disponibili: tuple[str, ...]
+) -> dict:
+    """Stato della correzione di molteplicita' al momento della pubblicazione.
+
+    H-A e' una delle cinque ipotesi primarie e la sola che deve arrivare al
+    tavolo per la Leva A.Applicarle oggi Holm sulla famiglia ridotta a H-A
+    darebbe a H-A la potenza che non ha — il suo p verrebbe confrontato con
+    0,05 invece che con 0,05 * 1/5 — e pubblicarebbe un verdetto di famiglia
+    prima che la famiglia esista.
+
+    Percio' qui si dichiara lo stato e **non** si applica la correzione:
+    l'artefatto riporta il p grezzo, la famiglia che manca, e il fatto che la
+    correzione non e' ancora applicabile. Quando H-B, H-C, H-E e H-F avranno i
+    loro p, la stessa funzione applica Holm sulla famiglia piena.
+    """
+    mancanti = [h for h in famiglia_attese if h not in ipotesi_disponibili]
+    completa = not mancanti
+    return {
+        "p": p_value,
+        "p_holm": None,
+        "alfa": 0.05,
+        "famiglia": list(ipotesi_disponibili),
+        "attese": list(famiglia_attese),
+        "mancanti": mancanti,
+        "completa": completa,
+        "nota": (
+            "Correzione Holm-Bonferroni non applicata: la famiglia pre-registrata "
+            f"contiene {len(famiglia_attese)} ipotesi e ne sono disponibili "
+            f"{len(ipotesi_disponibili)}. Correggere il solo p di H-A su una "
+            "famiglia ridotta gli darebbe la potenza di una ipotesi sola. "
+            "Il p pubblicato e' grezzo."
+        ),
+    }
+
+
 # ---------- Lettura archivio ----------
 
 
@@ -876,6 +972,7 @@ def _esegui_anno(
         }
 
     confronto = confronto_gruppi([(g, giorno, v) for g, _, giorno, v in osservazioni])
+    p_confronto = p_value_da_t(confronto.t, confronto.n_giorni_appaiate)
 
     return {
         "anno": anno,
@@ -902,6 +999,8 @@ def _esegui_anno(
             "n_giorni_appaiate": confronto.n_giorni_appaiate,
             "n_giorni_content_empty": confronto.n_giorni_content_empty,
             "n_giorni_non_content_empty": confronto.n_giorni_non_content_empty,
+            "p": p_confronto,
+            "gradi_liberta": max(confronto.n_giorni_appaiate - 1, 0),
             "verdetto": confronto.verdetto,
             "lettura": (
                 "SEPARA = gli articoli che il detector riconosce si "
@@ -909,6 +1008,11 @@ def _esegui_anno(
                 "la Leva A di #607 non e' appoggiata a questa evidenza."
             ),
         },
+        "molteplicita": stato_famiglia_holm(
+            p_value=p_confronto,
+            famiglia_attese=FAMIGLIA_PRIMARIA,
+            ipotesi_disponibili=("H-A",),
+        ),
     }
 
 

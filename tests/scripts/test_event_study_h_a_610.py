@@ -903,3 +903,88 @@ def test_il_confronto_e_il_verdetto_principale_del_artefatto():
         assert campo in risultato["confronto_gruppi"]
     # Il riferimento usato e' dichiarato: 1.0 non e' la nulla.
     assert risultato["riferimento_riportato"]["log"] != 0.0
+
+
+# ---------- Holm-Bonferroni sulla famiglia delle cinque ipotesi (review, punto 8) ----------
+
+
+def test_holm_ordina_per_p_value_e_correge_per_posizione():
+    """Holm: si ordina per p crescente e ogni soglia è m/(m-k+1).
+
+    Nessun `p * m` sui singoli (Bonferroni) ne' una soglia unica: la correzione
+    è progressiva, e questo è ciò che distingue Holm-Bonferroni.
+    """
+    from scripts.event_study_h_a_610 import holm
+
+    esito = holm({"H-A": 0.010, "H-B": 0.040, "H-C": 0.200, "H-E": 0.600, "H-F": 0.900})
+    assert [esito[h]["p"] for h in ("H-A", "H-B", "H-C", "H-E", "H-F")] == \
+        [0.010, 0.040, 0.200, 0.600, 0.900]
+    # p = 0,010 con m = 5: soglia 1 = 0,05/5 = 0,010 -> rifiutata al limite.
+    assert esito["H-A"]["rifiutata"] is True
+    assert esito["H-A"]["soglia"] == pytest.approx(0.01)
+    # p = 0,040: soglia 2 = 0,05/4 = 0,0125 -> NON rifiutata. Holm e' piu'
+    # restrittivo di Bonferroni (che avrebbe dato soglia 0,05 per tutte).
+    assert esito["H-B"]["rifiutata"] is False
+    assert esito["H-B"]["soglia"] == pytest.approx(0.0125)
+    # p = 0,200: soglia 3 × 0,05 = 0,15 -> non rifiutata, e la correzione
+    # si ferma: sotto Holm nessuna ipotesi successiva puo' essere rifiutata.
+    assert esito["H-C"]["rifiutata"] is False
+    # Oltre il primo non-rifiuto la correzione si ferma: H-E e H-F restano
+    # non rifiutate per la loro posizione, non per la propria soglia.
+    assert esito["H-E"]["rifiutata"] is False
+    assert esito["H-F"]["rifiutata"] is False
+
+
+def test_holm_si_ferma_al_primo_non_rifiuto():
+    """La correzione e' monotona decrescente: dopo un non-rifiuto, niente passa.
+
+    E' la proprieta' che rende Holm-Bonferroni piu' potente di Bonferroni e,
+    insieme, quella che impedisce a un p medio di ereditare la rifiutazione di un
+    p piccolo che sta solo al suo posto nell'ordinamento.
+    """
+    from scripts.event_study_h_a_610 import holm
+
+    # Solo la prima ipotesi e' sotto la propria soglia; la seconda no.
+    esito = holm({"H-A": 0.01, "H-B": 0.30, "H-C": 0.31, "H-E": 0.32, "H-F": 0.33})
+    assert esito["H-A"]["rifiutata"] is True
+    assert [esito[h]["rifiutata"] for h in ("H-B", "H-C", "H-E", "H-F")] == [False] * 4
+
+
+def test_un_ipotesi_indecidibile_non_entra_nella_famiglia_ma_viene_dichiarata():
+    """INSUFFICIENT_N non e' un p: non si ordina e non si dichiara rifiutata.
+
+    Il perimetro della famiglia conta m. Inserire un INSUFFICIENT_N come se
+    fosse p = 1.0 gonfierebbe la correzione degli altri cinque ipotesi e
+    indebolirebbe l'intera famiglia per un'ipotesi che non e' stata decisa.
+    """
+    from scripts.event_study_h_a_610 import holm
+
+    esito = holm(
+        {"H-A": 0.01, "H-B": 0.02},
+        indecidibili={"H-E": "INSUFFICIENT_N (3 giornate)", "H-F": "INSUFFICIENT_N"},
+    )
+    # m = 2, non 4: la soglia di H-A resta 0,05/2 = 0,025.
+    assert esito["H-A"]["soglia"] == pytest.approx(0.025)
+    assert "H-E" in esito["indecidibili"]
+    assert esito["indecidibili"]["H-E"].startswith("INSUFFICIENT_N")
+    assert "H-E" not in esito
+
+
+def test_la_famiglia_di_ha_resta_dichiarata_in_artefatto():
+    """Finche' la famiglia non e' completa, l'artefatto dichiara l'attesa.
+
+    H-A e' una delle cinque ipotesi primarie: applicarle oggi la correzione
+    sulla famiglia di uno solo darebbe a H-A una potenza che non ha e
+    pubblicarebbe un verdetto di famiglia prima che la famiglia esista.
+    """
+    from scripts.event_study_h_a_610 import stato_famiglia_holm
+
+    stato = stato_famiglia_holm(p_value=0.001, famiglia_attese=("H-A", "H-B", "H-C", "H-E", "H-F"),
+                                ipotesi_disponibili=("H-A",))
+    assert stato["famiglia"] == ["H-A"]
+    assert stato["attese"] == ["H-A", "H-B", "H-C", "H-E", "H-F"]
+    assert stato["completa"] is False
+    assert stato["p"] == 0.001
+    # Finche' non e' completa, nessuna correzione e' pubblicata come verdetto.
+    assert stato["p_holm"] is None
+    assert "non applicata" in stato["nota"]
