@@ -387,6 +387,101 @@ def osservazioni_valide(osservazioni: list[tuple[str, float]]) -> list[tuple[str
     ]
 
 
+# ---------- Il confronto fra i due gruppi (la domanda che H-A fa davvero) ----------
+
+
+@dataclass
+class EsitoConfronto:
+    """Verdetto di H-A: il detector separa i due gruppi?
+
+    ``differenza`` = media(non_content_empty) - media(content_empty) sull'eccesso
+    in spazio logaritmico, calcolata **sulle giornate in cui entrambi i gruppi
+    hanno almeno un'osservazione**.
+
+    Il confronto e' appaiato per giornata perche' e' l'unico modo di separare
+    l'effetto del detector da quello del calendario: la volatilita' di fondo
+    cambia da titolo a titolo e da giornata a giornata (apertura, stagionalita'),
+    e una differenza di medie non appaiate mescolerebbe quegli effetti al
+    detector. Sui giorni in cui i due gruppi non compaiono entrambi la
+    differenza non e' stimabile — e stimarla comunque sarebbe il difetto.
+
+    ``verdetto``: SEPARA / INDISTINGUIBILE / INSUFFICIENT_N, con
+    INSUFFICIENT_N che batte gli altri due (regola #171 della casa).
+    """
+
+    differenza: float
+    t: float
+    se: float
+    n_giorni_appaiate: int
+    n_giorni_content_empty: int
+    n_giorni_non_content_empty: int
+    verdetto: str
+
+    @property
+    def effetto_rilevabile_a_t3(self) -> float:
+        return SOGLIA_T * self.se if math.isfinite(self.se) else math.inf
+
+
+def _medie_giornaliere(osservazioni: list[tuple[str, float]]) -> dict[str, float]:
+    per_giorno: dict[str, list[float]] = defaultdict(list)
+    for giorno, valore in osservazioni_valide(osservazioni):
+        per_giorno[giorno].append(valore)
+    return {g: float(np.mean(v)) for g, v in per_giorno.items()}
+
+
+def confronto_gruppi(osservazioni: list[tuple[str, str, float]]) -> EsitoConfronto:
+    """Confronto appaiato per giornata fra i due gruppi del detector.
+
+    ``osservazioni`` = (gruppo, giorno, eccesso_log). H-A chiede se gli articoli
+    che il detector RICONOSCE si comportano come gli altri; e' quindi una
+    differenza, non due test separati contro la nulla.
+    """
+    per_gruppo: dict[str, list[tuple[str, float]]] = defaultdict(list)
+    for gruppo, giorno, valore in osservazioni:
+        per_gruppo[gruppo].append((giorno, valore))
+
+    medie = {nome: _medie_giornaliere(valli) for nome, valli in per_gruppo.items()}
+    giorni_ce = medie.get("content_empty", {})
+    giorni_nce = medie.get("non_content_empty", {})
+    comune = {
+        "n_giorni_content_empty": len(giorni_ce),
+        "n_giorni_non_content_empty": len(giorni_nce),
+    }
+    appaiate = sorted(set(giorni_ce) & set(giorni_nce))
+    if len(appaiate) < MIN_GIORNI:
+        return EsitoConfronto(
+            differenza=math.nan, t=math.nan, se=math.inf,
+            n_giorni_appaiate=len(appaiate), verdetto="INSUFFICIENT_N", **comune,
+        )
+
+    differenze = [giorni_nce[g] - giorni_ce[g] for g in appaiate]
+    differenza = float(np.mean(differenze))
+    se = float(np.std(differenze, ddof=1)) / math.sqrt(len(differenze))
+    if se == 0.0:
+        # Dispersione nulla sulle differenze appaiate: il t e' 0/0 e non
+        # definibile. Se anche la differenza media e' esattamente zero i due
+        # gruppi coincidono giornata per giornata, e "non separano" e' una
+        # constatazione esatta, non una mancanza di potenza — dirlo
+        # INSUFFICIENT_N sarebbe falso. Una differenza non nulla a dispersione
+        # nulla resta invece INSUFFICIENT_N: un t infinito non autorizza PASS.
+        return EsitoConfronto(
+            differenza=differenza, t=math.nan, se=se,
+            n_giorni_appaiate=len(appaiate),
+            verdetto="INDISTINGUIBILE" if differenza == 0.0 else "INSUFFICIENT_N",
+            **comune,
+        )
+    t = differenza / se
+    if abs(t) < SOGLIA_T:
+        return EsitoConfronto(
+            differenza=differenza, t=t, se=se, n_giorni_appaiate=len(appaiate),
+            verdetto="INSUFFICIENT_N", **comune,
+        )
+    return EsitoConfronto(
+        differenza=differenza, t=t, se=se, n_giorni_appaiate=len(appaiate),
+        verdetto="SEPARA" if differenza > 0 else "INDISTINGUIBILE", **comune,
+    )
+
+
 # ---------- Lettura archivio ----------
 
 

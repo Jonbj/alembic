@@ -586,3 +586,89 @@ def test_la_nulla_segue_le_riprezioni_osservate():
     pieno = null_log_rapporto(4, 23)
     scarso = null_log_rapporto(2, 23)
     assert scarso < pieno  # meno gradi di liberta' => std piu' piccola => ratio piu' basso
+
+
+# ---------- H-A confronta i due gruppi: non due test separati (review, punto 7) ----------
+
+
+def test_il_verdetto_di_ha_e_un_confronto_fra_i_due_gruppi():
+    """La domanda di H-A e' se il detector SEPARA, quindi e' una differenza.
+
+    Testare i due gruppi separatamente contro la nulla risponde a un'altra
+    domanda ("i non-template reagiscono?") e perde quella che conta: puo'
+    succedere che entrambi reagiscano uguale (niente separazione, nessuna
+    differenza) pur avendo entrambi un t sopra soglia. Il verdetto di H-A deve
+    essere la differenza fra le medie giornaliere dei due gruppi, con t su
+    quella differenza.
+    """
+    from scripts.event_study_h_a_610 import confronto_gruppi
+
+    # Due gruppi con lo STESSO effetto (1.6 ciascuno): nessuna separazione.
+    osservazioni = [
+        ("content_empty", f"2024-03-{d:02d}", 1.6 + 0.05 * (d % 3)) for d in range(1, 11)
+    ] + [
+        ("non_content_empty", f"2024-03-{d:02d}", 1.6 + 0.05 * (d % 3)) for d in range(1, 11)
+    ]
+    esito = confronto_gruppi(osservazioni)
+
+    assert esito.differenza == pytest.approx(0.0, abs=1e-9)
+    # t non e' definito (0/0: dispersione nulla su differenze tutte nulle), ma
+    # il verdetto e' una constatazione esatta, non una mancanza di potenza.
+    assert math.isnan(esito.t)
+    assert esito.verdetto == "INDISTINGUIBILE"
+
+
+def test_i_due_gruppi_con_effetti_diversi_danno_separazione():
+    """CONTENT_EMPTY fermo, non-CONTENT_EMPTY che reagisce: il verdetto passa."""
+    from scripts.event_study_h_a_610 import confronto_gruppi
+
+    osservazioni = [
+        ("content_empty", f"2024-03-{d:02d}", 0.96 + 0.01 * (d % 2)) for d in range(1, 26)
+    ] + [
+        ("non_content_empty", f"2024-03-{d:02d}", 1.9 + 0.10 * (d % 3)) for d in range(1, 26)
+    ]
+    esito = confronto_gruppi(osservazioni)
+
+    assert esito.differenza > 0
+    assert esito.verdetto == "SEPARA"
+
+
+def test_il_confronto_richiede_giornate_in_entrambi_i_gruppi():
+    """Un gruppo privo di osservazioni non da una differenza: INSUFFICIENT_N.
+
+    Il detector riconosce il 2,5% della popolazione: su una giornata stretta
+    puo' non restarne nessuno. In quel caso la differenza non e' 0, e' non
+    calcolabile — e "non calcolabile" batte ogni verdetto.
+    """
+    from scripts.event_study_h_a_610 import confronto_gruppi
+
+    solo_non_template = [
+        ("non_content_empty", f"2024-03-{d:02d}", 1.9) for d in range(1, 26)
+    ]
+    esito = confronto_gruppi(solo_non_template)
+
+    assert esito.verdetto == "INSUFFICIENT_N"
+    assert esito.n_giorni_content_empty == 0
+
+
+def test_dispersione_nulla_con_differenza_non_nulla_non_autorizza_pass():
+    """Il caso degenere inverso: se=0 ma differenza != 0 resta INSUFFICIENT_N.
+
+    E' il caso che la review non aveva considerato. Con se = 0 il t vale
+    infinito e un'implementazione ingenua lo passerebbe a PASS: un t infinito
+    non e' una misura, e' un denominatore sparito. Senza errore standard
+    stimabile non si autorizza nessun verdetto direzionale.
+    """
+    from scripts.event_study_h_a_610 import confronto_gruppi
+
+    osservazioni = [
+        ("content_empty", f"2024-03-{d:02d}", 1.0) for d in range(1, 11)
+    ] + [
+        ("non_content_empty", f"2024-03-{d:02d}", 2.0) for d in range(1, 11)
+    ]
+    esito = confronto_gruppi(osservazioni)
+
+    assert esito.differenza == pytest.approx(1.0)
+    assert esito.se == 0.0
+    assert math.isnan(esito.t) or math.isinf(esito.t)
+    assert esito.verdetto == "INSUFFICIENT_N"
