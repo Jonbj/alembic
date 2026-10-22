@@ -5795,9 +5795,15 @@
           "costo_usd": null,
           "nota": "DAY-011: dossier snapshot_apertura WDC (trade 373) qty_open 0 con missingness exit_fill_qty_exceeds_trade_qty mentre il residuo al broker e' 0,3347 az. (P&L c2c +2,18 $ omesso); reconcile-positions 21:35 'partially_wound_down_coheld: 2, anomalies: 0'.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-25.md §10"
+        },
+        {
+          "data": "2026-10-12",
+          "costo_usd": 69.38,
+          "nota": "stop protettivo GTC ARM ambc-pstop-ARM-20261001T1422 (2 az., stop 253.92) fillato 2026-10-12 18:49:25Z @253.85; trade 1041 resta aperto con qty 2.0439 e senza exit_time; dossier snapshot_apertura qty_open 0.0439 con missingness exit_fill_qty_exceeds_trade_qty; assente da chiusure.",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-12.md §8"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 69.38,
       "occorrenze_non_stimate": 15,
       "stato": "aperto",
       "issue": null
@@ -7973,9 +7979,15 @@
           "costo_usd": null,
           "nota": "[DAY-001] worker-inference 'Warm shutdown (MainProcess)' alle 16:20:12Z senza riavvio (deploy reconcile 16:20:02 'Gia' allineato a 5463d279', journal host vuoto: causa non ricostruibile); restart bruschi senza riga di shutdown anche alle 10:36Z e 12:56Z. Ultimo segnale 16:15:24; 22 run_sentiment_worker emessi dal beat dopo le 16:20 mai ricevuti; news_queue_census 3 (16:30) -> 326 (23:30); benzinga queued 729 vs 151 righe news_log. mobile_events pipeline:signal_stale warning aperto 16:39 (rientrato 10-16), mobile_notification_deliveries vuota, nessun Telegram. Costo null: nella finestra 16:20-20:00 nessun mover rialzista con news identificabile (HD NO_NEWS, ADBE BELOW_GATE), contenuto della coda non persistito. Occorrenza anteriore al primo avvistamento: primo_avvistamento portato al 2026-10-08.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-08.md §10 [DAY-001]"
+        },
+        {
+          "data": "2026-10-12",
+          "costo_usd": 74.36,
+          "nota": "2026-10-12: seconda seduta intera senza worker-inference (nessun log del 10-12); 0 righe news_log/sentiment_signals su 96/96; beat emette 32 sentiment-worker e 15 sentiment-shadow-offsession mai eseguiti; news_queue_census queue_depth 1154 -> 1819; poller REST accodano 33 articoli; 5 EXIT_RISK STALE_EXIT_SIGNAL; PLTR e SAP chiusi da portfolio_sell '[no_signal] no S4 signal found in DB'.",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-12.md §8"
         }
       ],
-      "costo_cumulato_usd": 291.55,
+      "costo_cumulato_usd": 365.91,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
