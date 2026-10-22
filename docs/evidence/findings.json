@@ -900,12 +900,18 @@
           "costo_usd": null,
           "nota": "[DAY-006] Telegram 400 Bad Request alle 14:52:10 e 17:22:11 sugli alert #161 WDC unprotected -26,3%/-28,4% e NOK -15,0%. Costo gia' contato in F-036 (ALPHA_MISS 10-08).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-08.md §10 [DAY-006]"
+        },
+        {
+          "data": "2026-10-09",
+          "costo_usd": null,
+          "nota": "[DAY-004] Telegram 400 alle 15:07:08 sull'alert #161 WDC unprotected -28,9%; held_news_loss_alert solo alle 22:50. Costo non stimabile (nessuna decisione alternativa misurabile).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-09.md §10 [DAY-004]"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 22
+      "occorrenze_non_stimate": 23
     },
     {
       "id": "F-006",
@@ -1214,12 +1220,18 @@
           "costo_usd": null,
           "nota": "[DAY-007] alpaca_benzinga duplicates 5.472 > fetched 974 (queued 729).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-08.md §10 [DAY-007]"
+        },
+        {
+          "data": "2026-10-09",
+          "costo_usd": null,
+          "nota": "[DAY-007] alpaca_benzinga fetched 1.098, duplicates 6.487 (5,9x); gdelt fetched 2.002, duplicates 3.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-09.md §10 [DAY-007]"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 41
+      "occorrenze_non_stimate": 42
     },
     {
       "id": "F-008",
@@ -2727,10 +2739,16 @@
           "costo_usd": null,
           "nota": "[DAY-007] orders_count 1-5 per ciclo contro <=1 ordine inviato; LLY BUY in final_orders di 14 cicli mai inviato (P0-05).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-007"
+        },
+        {
+          "data": "2026-10-09",
+          "costo_usd": null,
+          "nota": "[DAY-007] sum(orders_count) 48 su 24 cicli (CombinedOrder BUY PLTR/SAP) contro 0 ordini inviati (P0-05).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-09.md §10 [DAY-007]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 33,
+      "occorrenze_non_stimate": 34,
       "stato": "aperto",
       "issue": null
     },
@@ -3071,10 +3089,16 @@
           "costo_usd": null,
           "nota": "DAY-015: 'SPY benchmark fetch failed' x204, nessun alert.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-02.md §10 DAY-015"
+        },
+        {
+          "data": "2026-10-09",
+          "costo_usd": null,
+          "nota": "[DAY-007] 84 x 'SPY benchmark fetch failed: subscription does not permit querying recent SIP data', nessun alert.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-09.md §10 [DAY-007]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 20,
+      "occorrenze_non_stimate": 21,
       "stato": "aperto",
       "issue": "#444"
     },
@@ -3174,10 +3198,16 @@
           "costo_usd": null,
           "nota": "[DAY-007] 07:00:57 LLM-2 regime detection 410 Gone, task succeeded.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-05.md sez.10 DAY-007"
+        },
+        {
+          "data": "2026-10-09",
+          "costo_usd": null,
+          "nota": "[DAY-003] regime-detector 07:00 e 13:30 accodati su inference e mai eseguiti; sizing con regime:current del 10-08 13:30 (x0,7 su 2.281/2.281 decisioni, TTL 72 h) senza alcun warning P0-09. Nessun ordine nella seduta: costo non stimabile.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-09.md §10 [DAY-003]"
         }
       ],
       "costo_cumulato_usd": 52.35,
-      "occorrenze_non_stimate": 14,
+      "occorrenze_non_stimate": 15,
       "stato": "aperto",
       "issue": null
     },
@@ -3331,10 +3361,16 @@
           "costo_usd": null,
           "nota": "[DAY-008] URL con bot token in chiaro: 11.773 righe worker-inference + 5 worker.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-08.md §10 [DAY-008]"
+        },
+        {
+          "data": "2026-10-09",
+          "costo_usd": null,
+          "nota": "[DAY-006] 3 righe con bot token in chiaro nel worker log (poller fermo con worker-inference).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-09.md §10 [DAY-006]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 24,
+      "occorrenze_non_stimate": 25,
       "stato": "aperto",
       "issue": null
     },
@@ -3804,10 +3840,16 @@
           "costo_usd": null,
           "nota": "[DAY-013] mobile_events portfolio_cycle_late critical 13:30 -> 14:08; primo ciclo 14:07 (37 min di RTH persi). Primo segnale >=0,30 alle 14:23: nessun costo nella giornata, ma non e' zero per costruzione -> null.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-08.md §10 [DAY-013]"
+        },
+        {
+          "data": "2026-10-09",
+          "costo_usd": null,
+          "nota": "[DAY-008] portfolio_cycle_late critical 13:30-14:08; session_grid open_gap 37,0 min, close_gap 8,0 min. Nessun segnale fresco: costo non stimabile.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-09.md §10 [DAY-008]"
         }
       ],
       "costo_cumulato_usd": 96.72,
-      "occorrenze_non_stimate": 31,
+      "occorrenze_non_stimate": 32,
       "stato": "aperto",
       "issue": null
     },
@@ -3967,10 +4009,16 @@
           "costo_usd": null,
           "nota": "[DAY-010] Stop protettivi interi 15 min dopo l'ingresso: PLTR 7/7,97 (87,8%), SPCX 9/9,66 (93,2%) alle 14:52, SAP 7/7,67 (91,2%) alle 15:22.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-08.md §10 [DAY-010]"
+        },
+        {
+          "data": "2026-10-09",
+          "costo_usd": null,
+          "nota": "[DAY-005] 9/41 posizioni non proteggibili (qty < 1): AMAT, AMD, ASML, CAT, DELL, LLY, NOK, SPY, WDC; WDC -27,7% da ingresso senza stop.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-09.md §10 [DAY-005]"
         }
       ],
       "costo_cumulato_usd": 35.9,
-      "occorrenze_non_stimate": 23,
+      "occorrenze_non_stimate": 24,
       "stato": "aperto",
       "issue": null
     },
@@ -6709,10 +6757,16 @@
           "costo_usd": null,
           "nota": "[DAY-008] 6 DECAY CRITICAL (S1/S2/S4) alle 21:00:00, solo log.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-08.md §10 [DAY-008]"
+        },
+        {
+          "data": "2026-10-09",
+          "costo_usd": null,
+          "nota": "[DAY-006] 6 DECAY CRITICAL alle 21:00 (S1/S2/S4, IC -0,009, Sharpe -1,20) solo nel log.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-09.md §10 [DAY-006]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 25,
+      "occorrenze_non_stimate": 26,
       "stato": "aperto",
       "issue": null
     },
@@ -7985,10 +8039,16 @@
           "costo_usd": 74.36,
           "nota": "2026-10-12: seconda seduta intera senza worker-inference (nessun log del 10-12); 0 righe news_log/sentiment_signals su 96/96; beat emette 32 sentiment-worker e 15 sentiment-shadow-offsession mai eseguiti; news_queue_census queue_depth 1154 -> 1819; poller REST accodano 33 articoli; 5 EXIT_RISK STALE_EXIT_SIGNAL; PLTR e SAP chiusi da portfolio_sell '[no_signal] no S4 signal found in DB'.",
           "fonte": "ALPHA_MISS_REPORT_2026-10-12.md §8"
+        },
+        {
+          "data": "2026-10-09",
+          "costo_usd": null,
+          "nota": "[DAY-001] Seduta intera senza consumatore inference: nessun log worker-inference del 10-09, 0 righe news_log/sentiment_signals/llm_responses/finbert_fallback_events; beat accoda 32 sentiment-worker, 15 shadow, 17.280 poll-telegram-updates mai eseguiti; news_queue_census 326 -> 1.008 (oldest 34 h); deploy reconcile 14:20 senza rebuild; signal_stale warning senza consegna. Costo null qui: gia' stimato nell'occorrenza ALPHA_MISS dello stesso giorno (291,55 $), non ricontato.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-09.md §10 [DAY-001]"
         }
       ],
       "costo_cumulato_usd": 365.91,
-      "occorrenze_non_stimate": 1,
+      "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
     }
