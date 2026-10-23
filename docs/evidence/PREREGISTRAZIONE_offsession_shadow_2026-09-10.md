@@ -61,7 +61,10 @@ suo stato, per non contendere `worker-inference` (concurrency=1) nella finestra 
 apertura. Un'interruzione per scadenza è un troncamento del campione, non un errore:
 va conteggiata e pubblicata.
 
-Prima esecuzione: `______` (da compilare al primo run reale, non prima).
+Prima esecuzione: **2026-09-12 22:15:16Z** (compilata il 2026-09-28 in occasione
+della lettura dei risultati; la prima riga in `sentiment_signals_offsession_shadow`
+ha quel `scored_at` — deploy C del 2026-09-12, PR #562. Esito della lettura:
+`docs/evidence/ESITO_offsession_shadow_2026-09-28.md`).
 
 ## 3. Regola fissata
 
