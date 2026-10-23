@@ -7650,10 +7650,16 @@
           "costo_usd": null,
           "nota": "DAY-004: news-stream WS 102 errori 'connection limit exceeded', 103 riavvii, nessun alert; log senza timestamp, buchi non quantificabili.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-30.md §10 DAY-004"
+        },
+        {
+          "data": "2026-10-13",
+          "costo_usd": null,
+          "nota": "2026-10-13: Redis MISCONF (RDB non persistibile, disco pieno) alle 11:03:12Z; worker principale 'Unrecoverable error', 0 task ricevuti dopo, reconnect fino a fine log 16:08Z; beat 17.550 errori MISCONF; 0 execution_decisions e 0 portfolio_cycles il 10-13 (24 il 10-12), 0 anche 10-14 e 10-15, ripresa 10-16 (23); 0 ordini Alpaca; news_queue_census fermo alle 11:00Z; nessun log del 10-14; 0 mobile_notification_deliveries; api /api/health 200 per tutto il tempo. Peggioramento materiale: da 11 minuti a un'intera seduta RTH.",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-13.md §8"
         }
       ],
       "costo_cumulato_usd": 0.0,
-      "occorrenze_non_stimate": 1,
+      "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
     },
@@ -8045,9 +8051,15 @@
           "costo_usd": null,
           "nota": "[DAY-001] Seduta intera senza consumatore inference: nessun log worker-inference del 10-09, 0 righe news_log/sentiment_signals/llm_responses/finbert_fallback_events; beat accoda 32 sentiment-worker, 15 shadow, 17.280 poll-telegram-updates mai eseguiti; news_queue_census 326 -> 1.008 (oldest 34 h); deploy reconcile 14:20 senza rebuild; signal_stale warning senza consegna. Costo null qui: gia' stimato nell'occorrenza ALPHA_MISS dello stesso giorno (291,55 $), non ricontato.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-09.md §10 [DAY-001]"
+        },
+        {
+          "data": "2026-10-13",
+          "costo_usd": 288.65,
+          "nota": "2026-10-13: terza seduta consecutiva senza worker-inference (nessun log del 10-13; primo dopo il guasto il 10-16); 0 righe news_log/sentiment_signals su 96/96; beat emette 9 sentiment-worker e 13 sentiment-shadow-offsession prima delle 11:03Z, mai eseguiti; news_queue_census 1819 -> 1853 fino alle 11:00Z; 5 EXIT_RISK STALE_EXIT_SIGNAL; dalle 11:03Z mascherato da F-085.",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-13.md §8"
         }
       ],
-      "costo_cumulato_usd": 365.91,
+      "costo_cumulato_usd": 654.56,
       "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
