@@ -302,12 +302,18 @@
           "costo_usd": null,
           "nota": "[DAY-007] Copertura effective-timely 38/96 (39,6%), 40 ticker a zero righe. Costo gia' stimato nell'occorrenza ALPHA_MISS della stessa data (HD 74,67 $), non ricontato.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-08.md §10 [DAY-007]"
+        },
+        {
+          "data": "2026-10-13",
+          "costo_usd": null,
+          "nota": "[DAY-005] watchlist_zero_news 96/96, news_log 0 righe: conseguenza del guasto pipeline (F-096), non di scopertura delle fonti. Costo gia' nell'alpha-miss, non ricontato.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-13.md sez. 10"
         }
       ],
       "costo_cumulato_usd": 5833.51,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 14
+      "occorrenze_non_stimate": 15
     },
     {
       "id": "F-002",
@@ -4560,10 +4566,16 @@
           "costo_usd": null,
           "nota": "[DAY-024] Nessun log container per il 2026-08-28: il file piu' vecchio in logs/containers/ e' worker-2026-09-04.log. L'intera fase del protocollo forense che dipende dai log (chiamate LLM per modello, timeout, retry Celery, eccezioni silenziose, restart dei worker) non e' eseguibile per questa data. Tutto il report del 2026-08-28 proviene da Postgres, dall'API REST e dagli artefatti in docs/evidence.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-28.md"
+        },
+        {
+          "data": "2026-10-13",
+          "costo_usd": null,
+          "nota": "[DAY-004] Mancano worker-inference e news-stream del 10-13 e ogni log del 10-14; worker/beat finiscono alle 16:08Z con mtime 18:09. Fasi LLM/restart non verificabili.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-13.md sez. 10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 20,
+      "occorrenze_non_stimate": 21,
       "stato": "aperto",
       "issue": null
     },
@@ -7746,10 +7758,16 @@
           "costo_usd": null,
           "nota": "2026-10-14: seconda seduta RTH consecutiva senza cicli portfolio: 0 execution_decisions (DB; ripresa 10-16 con 1634), 0 ingressi/chiusure/intenti S4, nessun file di log di api/beat/worker/worker-inference del 10-14, disco host al 94%; 39 posizioni senza valutazione d'uscita, 9 con perdita >=3% dall'ingresso. Attribuzione al MISCONF ereditata dal 10-13, non misurata per il 10-14.",
           "fonte": "ALPHA_MISS_REPORT_2026-10-14.md §8"
+        },
+        {
+          "data": "2026-10-13",
+          "costo_usd": null,
+          "nota": "[DAY-001] Il worker principale muore alle 11:03:12Z e riparte solo il 2026-10-15 16:10:03Z (~53 h, container 'Up' per tutto il periodo); beat 4.388 errori 'Couldn't apply scheduled task' (9 portfolio-cycle, 9 run-execution, 9 sentiment-worker non consegnati); 0 snapshot monitor, 0 alert Telegram/mobile; disco host 95%. Costo gia' in ALPHA_MISS (occorrenza stessa data), non ricontato.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-13.md sez. 10"
         }
       ],
       "costo_cumulato_usd": 0.0,
-      "occorrenze_non_stimate": 3,
+      "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
     },
@@ -8091,10 +8109,16 @@
           "costo_usd": null,
           "nota": "Network is unreachable 15:43-15:53 (Telegram), barre/clock Alpaca irraggiungibili 15:42/15:51; nessun alert",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-06.md DAY-006"
+        },
+        {
+          "data": "2026-10-13",
+          "costo_usd": null,
+          "nota": "[DAY-003] DNS irraggiungibile 06:14-11:03Z (NameResolutionError su paper-api/data.alpaca, ~660/h, 4h49m), git fetch deploy_reconcile fallito 06:20/08:20/10:20/12:20; nessun alert recapitato. Pre-market: nessun costo stimabile.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-13.md sez. 10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 3,
+      "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
     },
@@ -8165,10 +8189,16 @@
           "costo_usd": 180.04,
           "nota": "2026-10-14: quarta seduta senza worker-inference (10-09, 10-12, 10-13, 10-14); 0 righe news_log/sentiment_signals su 96/96; 15 EXIT_RISK con exit_signal_recall 0/15 (12 STALE, 3 NO_EXIT_SIGNAL); 9 posizioni cieche lato uscita (notional 3956,60 $).",
           "fonte": "ALPHA_MISS_REPORT_2026-10-14.md §8"
+        },
+        {
+          "data": "2026-10-13",
+          "costo_usd": null,
+          "nota": "[DAY-002] Terza seduta senza worker-inference: 0 righe news_log/sentiment_signals/llm_responses/finbert_fallback_events; nessun log inference del 10-13. Costo (288,65 $) gia' nell'occorrenza ALPHA_MISS della stessa data, non ricontato.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-10-13.md sez. 10"
         }
       ],
       "costo_cumulato_usd": 834.6,
-      "occorrenze_non_stimate": 3,
+      "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
     }
