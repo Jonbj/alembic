@@ -7740,10 +7740,16 @@
           "costo_usd": null,
           "nota": "2026-10-13: Redis MISCONF (RDB non persistibile, disco pieno) alle 11:03:12Z; worker principale 'Unrecoverable error', 0 task ricevuti dopo, reconnect fino a fine log 16:08Z; beat 17.550 errori MISCONF; 0 execution_decisions e 0 portfolio_cycles il 10-13 (24 il 10-12), 0 anche 10-14 e 10-15, ripresa 10-16 (23); 0 ordini Alpaca; news_queue_census fermo alle 11:00Z; nessun log del 10-14; 0 mobile_notification_deliveries; api /api/health 200 per tutto il tempo. Peggioramento materiale: da 11 minuti a un'intera seduta RTH.",
           "fonte": "ALPHA_MISS_REPORT_2026-10-13.md §8"
+        },
+        {
+          "data": "2026-10-14",
+          "costo_usd": null,
+          "nota": "2026-10-14: seconda seduta RTH consecutiva senza cicli portfolio: 0 execution_decisions (DB; ripresa 10-16 con 1634), 0 ingressi/chiusure/intenti S4, nessun file di log di api/beat/worker/worker-inference del 10-14, disco host al 94%; 39 posizioni senza valutazione d'uscita, 9 con perdita >=3% dall'ingresso. Attribuzione al MISCONF ereditata dal 10-13, non misurata per il 10-14.",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-14.md §8"
         }
       ],
       "costo_cumulato_usd": 0.0,
-      "occorrenze_non_stimate": 2,
+      "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
     },
@@ -8153,9 +8159,15 @@
           "costo_usd": null,
           "nota": "[DAY-001] Seconda seduta intera senza consumatore inference: nessun log worker-inference/news-stream del 10-12; 0 righe news_log/sentiment_signals/llm_responses/finbert_fallback_events; beat accoda 32 sentiment-worker, 15 shadow, 17.280 poll-telegram mai eseguiti; news_queue_census 1.154 -> 1.819 (oldest ~106 h); deploy reconcile 08:20/14:20 senza rebuild; 0 mobile_notification_deliveries. Costo null qui: gia' stimato nell'occorrenza ALPHA_MISS dello stesso giorno (74,36 $), non ricontato.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-10-12.md §10 [DAY-001]"
+        },
+        {
+          "data": "2026-10-14",
+          "costo_usd": 180.04,
+          "nota": "2026-10-14: quarta seduta senza worker-inference (10-09, 10-12, 10-13, 10-14); 0 righe news_log/sentiment_signals su 96/96; 15 EXIT_RISK con exit_signal_recall 0/15 (12 STALE, 3 NO_EXIT_SIGNAL); 9 posizioni cieche lato uscita (notional 3956,60 $).",
+          "fonte": "ALPHA_MISS_REPORT_2026-10-14.md §8"
         }
       ],
-      "costo_cumulato_usd": 654.56,
+      "costo_cumulato_usd": 834.6,
       "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
